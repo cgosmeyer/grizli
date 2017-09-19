@@ -1,21 +1,41 @@
 """
 Align direct images & make mosaics
 """
-import os
-from collections import OrderedDict
-import glob
 
-import numpy as np
-import matplotlib.pyplot as plt
-
-# conda install shapely
-# from shapely.geometry.polygon import Polygon
-
-import astropy.io.fits as pyfits
-import astropy.wcs as pywcs
-import astropy.units as u
 import astropy.coordinates as coord
+import astropy.io.fits as pyfits
+from astropy.modeling import models
+import astropy.units as u
+import astropy.wcs as pywcs
+
+import copy
+import glob
+import lacosmicx
+import matplotlib.pyplot as plt
+import numpy as np
+import numpy.ma
+import os
+import pyregion
+import scipy.ndimage as nd
+import scipy.spatial
+import sewpy
+import shutil
+import skimage.transform
+import stsci.stimage
+
 from astropy.table import Table
+from astroquery.irsa import Irsa
+from astroquery.sdss import SDSS
+from astroquery.ukidss import Ukidss
+from collections import OrderedDict
+from drizzlepac import updatehdr
+from drizzlepac.astrodrizzle import AstroDrizzle
+from scipy import polyfit, polyval
+from shapely.geometry import Polygon
+from skimage.measure import ransac
+from sklearn.gaussian_process import GaussianProcess
+from stsci.tools import asnutil
+from stwcs import updatewcs
 
 from . import utils
 from . import model
@@ -63,7 +83,6 @@ check_status()
 def go_all():
     """TBD
     """
-    from stsci.tools import asnutil
     info = Table.read('files.info', format='ascii.commented_header')
         
     # files=glob.glob('../RAW/i*flt.fits')
@@ -82,7 +101,9 @@ def go_all():
         asn.create()
         asn.write()
         
-def fresh_flt_file(file, preserve_dq=False, path='../RAW/', verbose=True, extra_badpix=True, apply_grism_skysub=True, crclean=False, mask_regions=True):
+def fresh_flt_file(file, preserve_dq=False, path_raw='../RAW/', verbose=True, 
+    extra_badpix=True, apply_grism_skysub=True, crclean=False, 
+    mask_regions=True):
     """Copy "fresh" unmodified version of a data file from some central location
     
     TBD
@@ -92,7 +113,7 @@ def fresh_flt_file(file, preserve_dq=False, path='../RAW/', verbose=True, extra_
     preserve_dq : bool
         Preserve DQ arrays of files if they exist in './'
         
-    path : str
+    path_raw : str
         Path where to find the "fresh" files
         
     verbose : bool
@@ -113,7 +134,6 @@ def fresh_flt_file(file, preserve_dq=False, path='../RAW/', verbose=True, extra_
     Nothing, but copies the file from `path` to `./`.
         
     """
-    import shutil
     
     local_file = os.path.basename(file)
     if preserve_dq:
@@ -124,9 +144,9 @@ def fresh_flt_file(file, preserve_dq=False, path='../RAW/', verbose=True, extra_
             orig_dq = None
     else:
         dq = None
-            
+
     if file == local_file:
-        orig_file = pyfits.open(glob.glob(os.path.join(path, file)+'*')[0])
+        orig_file = pyfits.open(glob.glob(os.path.join(path_raw, file)+'*')[0])
     else:
         orig_file = pyfits.open(file)
     
@@ -224,7 +244,7 @@ def fresh_flt_file(file, preserve_dq=False, path='../RAW/', verbose=True, extra_
         extra_msg += ' / bpix: $iref/badpix_spars200_Nov9.fits'
     
     if crclean:
-        import lacosmicx
+        
         for ext in [1,2]:
             print('Clean CRs with LACosmic, extension {0:d}'.format(ext))
             
@@ -318,7 +338,6 @@ def apply_persistence_mask(flt_file, path='../Persistence', dq_value=1024,
     Nothing, updates the DQ extension of `flt_file`.
     
     """
-    import scipy.ndimage as nd
     
     flt = pyfits.open(flt_file, mode='update')
     
@@ -376,7 +395,6 @@ def apply_region_mask(flt_file, dq_value=1024, verbose=True):
     integer referring to the SCI extension in the FLT file.
 
     """
-    import pyregion
     
     mask_files = glob.glob(flt_file.replace('_flt.fits','.*.mask.reg').replace('_flc.fits','.*.mask.reg'))
     if len(mask_files) == 0:
@@ -411,7 +429,6 @@ def apply_saturated_mask(flt_file, dq_value=1024):
     Nothing, modifies DQ extension of `flt_file` in place.
     
     """
-    import scipy.ndimage as nd
     
     flt = pyfits.open(flt_file, mode='update')
     
@@ -441,7 +458,6 @@ def clip_lists(input, output, clip=20):
     Clip [x,y] arrays of objects that don't have a match within `clip` pixels
     in either direction
     """
-    import scipy.spatial
     
     tree = scipy.spatial.cKDTree(input, 10)
     
@@ -480,13 +496,6 @@ def match_lists(input, output, transform=None, scl=3600., simple=True,
     
     If `transform` is None, use Similarity transform (shift, scale, rot) 
     """
-    import copy
-    from astropy.table import Table    
-    
-    import skimage.transform
-    from skimage.measure import ransac
-
-    import stsci.stimage
     
     if transform is None:
         transform = skimage.transform.SimilarityTransform
@@ -770,9 +779,7 @@ def make_drz_catalog(root='', sexpath='sex',threshold=2., get_background=True,
     
     TBD
     """
-    import copy
-    import sewpy
-    
+
     if sci is not None:
         drz_file = sci
     else:
@@ -878,7 +885,6 @@ def add_external_sources(root='', maglim=20, fwhm=0.2, catalog='2mass'):
     savesimages : type
 
     """
-    from astropy.modeling import models
     
     sci_file = glob.glob('{0}_dr[zc]_sci.fits'.format(root))[0]
     wht_file = glob.glob('{0}_dr[zc]_wht.fits'.format(root))[0]
@@ -973,7 +979,6 @@ def asn_to_dict(input_asn):
         Dictionary with keys 'product' and 'files'.
         
     """
-    from stsci.tools import asnutil
     # Already is a dict
     if instance(input_asn, dict):
         return input_asn
@@ -1008,8 +1013,6 @@ def get_ukidss_catalog(ra=165., dec=34.8, radius=3, database='UKIDSSDR9PLUS',
         Result of the query
         
     """
-
-    from astroquery.ukidss import Ukidss
     
     coo = coord.SkyCoord(ra*u.deg, dec*u.deg)
     
@@ -1035,7 +1038,6 @@ def get_sdss_catalog(ra=165.86, dec=34.829694, radius=3):
         Result of the query
         
     """
-    from astroquery.sdss import SDSS
     
     coo = coord.SkyCoord(ra*u.deg, dec*u.deg)
     
@@ -1065,7 +1067,6 @@ def get_irsa_catalog(ra=165.86, dec=34.829694, radius=3, catalog='allwise_p3as_p
         Result of the query
         
     """
-    from astroquery.irsa import Irsa
     
     #all_wise = 'wise_allwise_p3as_psd'
     #all_wise = 'allwise_p3as_psd'
@@ -1365,6 +1366,7 @@ def get_radec_catalog(ra=0., dec=0., radius=3., product='cat', verbose=True, ref
     return radec, ref_catalog
     
 def process_direct_grism_visit(direct={}, grism={}, radec=None,
+                               path_raw='../RAW',
                                align_tolerance=5, align_clip=30,
                                align_mag_limits = [14,23],
                                column_average=True, 
@@ -1381,10 +1383,6 @@ def process_direct_grism_visit(direct={}, grism={}, radec=None,
     TBD
     
     """    
-    from stsci.tools import asnutil
-    from stwcs import updatewcs
-    from drizzlepac import updatehdr
-    from drizzlepac.astrodrizzle import AstroDrizzle
     
     ################# 
     ##########  Direct image processing
@@ -1397,7 +1395,7 @@ def process_direct_grism_visit(direct={}, grism={}, radec=None,
     if not skip_direct:
         for file in direct['files']:
             crclean = isACS & (len(direct['files']) == 1)
-            fresh_flt_file(file, crclean=crclean)
+            fresh_flt_file(file, path_raw=path_raw, crclean=crclean)
             updatewcs.updatewcs(file, verbose=False)
     
         ### Make ASN
@@ -1410,7 +1408,7 @@ def process_direct_grism_visit(direct={}, grism={}, radec=None,
     skip_grism = (grism == {}) | (grism is None) | (len(grism) == 0)
     if not skip_grism:
         for file in grism['files']:
-            fresh_flt_file(file)
+            fresh_flt_file(file, path_raw=path_raw)
             
             # Need to force F814W filter for updatewcs
             if isACS:
@@ -1717,8 +1715,6 @@ def tweak_align(direct_group={}, grism_group={}, max_dist=1., key=' ',
     """
     Intra-visit shifts (WFC3/IR)
     """
-    from drizzlepac.astrodrizzle import AstroDrizzle
-    from scipy import polyfit, polyval
     
     if len(direct_group['files']) < 2:
         print('Only one direct image found, can\'t compute shifts!')
@@ -2037,9 +2033,6 @@ def match_direct_grism_wcs(direct={}, grism={}, get_fresh_flt=True,
     
     TBD
     """
-    from drizzlepac import updatehdr
-    from stwcs import updatewcs
-    from drizzlepac.astrodrizzle import AstroDrizzle
     
     wcs_log = Table.read('{0}_wcs.log'.format(direct['product']),
                          format='ascii.commented_header')
@@ -2087,9 +2080,6 @@ def match_direct_grism_wcs(direct={}, grism={}, get_fresh_flt=True,
 def align_multiple_drizzled(mag_limits=[16,23]):
     """TBD
     """
-    from stwcs import updatewcs
-    from drizzlepac import updatehdr
-    from drizzlepac.astrodrizzle import AstroDrizzle
     
     drz_files = ['j0800+4029-080.0-f140w_drz_sci.fits', 
                  'j0800+4029-117.0-f140w_drz_sci.fits']
@@ -2163,10 +2153,6 @@ def visit_grism_sky(grism={}, apply=True, column_average=True, verbose=True, ext
     TBD
     
     """
-    import numpy.ma
-    import scipy.ndimage as nd
-    
-    from sklearn.gaussian_process import GaussianProcess
     
     ### Figure out which grism 
     im = pyfits.open(grism['files'][0])
@@ -2472,8 +2458,7 @@ def fix_star_centers(root='macs1149.6+2223-rot-ca5-22-032.0-f105w',
     Nothing, updates FLT files in place.
 
     """
-    from drizzlepac.astrodrizzle import AstroDrizzle
-    
+
     EPSF = utils.EffectivePSF()
     
     sci = pyfits.open('{0}_drz_sci.fits'.format(root))
@@ -2584,9 +2569,7 @@ def find_single_image_CRs(visit, simple_mask=False):
         
     Requires context (CTX) image `visit['product']+'_drc_ctx.fits`.   
     """
-    from drizzlepac import astrodrizzle
-    import lacosmicx
-    
+
     ctx = pyfits.open(visit['product']+'_drc_ctx.fits')
     bits = np.log2(ctx[0].data)
     mask = ctx[0].data == 0
@@ -2676,8 +2659,6 @@ def drizzle_overlaps(exposure_groups, parse_visits=False, check_overlaps=True, m
     Produces drizzled images.
     
     """
-    from drizzlepac.astrodrizzle import AstroDrizzle
-    from shapely.geometry import Polygon
     
     if parse_visits:
         exposure_groups = utils.parse_visit_overlaps(exposure_groups, buffer=15.)
@@ -2822,8 +2803,7 @@ def manual_alignment(visit, ds9, reference=None, reference_catalogs=['SDSS', 'PS
     type any character in the terminal at the first pause/prompt.
     
     """
-    import os
-    
+
     im = pyfits.open('../RAW/'+visit['files'][0])
     ra, dec = im[1].header['CRVAL1'], im[1].header['CRVAL2']
     
