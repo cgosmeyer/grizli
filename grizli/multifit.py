@@ -1,19 +1,39 @@
 """Functionality for manipulating multiple grism exposures simultaneously
 """
 
-import os
-import time
-import glob
-from collections import OrderedDict
-import multiprocessing as mp
-
-import scipy.ndimage as nd
-import numpy as np
-import matplotlib.pyplot as plt
-
-from astropy.table import Table
 import astropy.io.fits as pyfits
 import astropy.units as u
+import astropy.wcs as pywcs
+import copy
+import glob
+import logging
+import matplotlib.gridspec
+import matplotlib.pyplot as plt
+import multiprocessing as mp
+import numpy as np
+import os
+import peakutils
+import pysynphot
+import scipy.ndimage as nd
+import scipy.optimize
+import sklearn.linear_model
+import time      
+
+try:
+    import cPickle as pickle
+except:
+    # Python 3
+    import pickle
+
+from astropy import log
+from astropy.modeling import models, fitting
+from astropy.table import Table
+from collections import OrderedDict
+from drizzlepac.astrodrizzle import adrizzle
+from matplotlib.gridspec import GridSpec
+from matplotlib.ticker import MultipleLocator
+from scipy import polyfit, polyval
+from stwcs import distortion
 
 ## local imports
 from . import grismconf
@@ -29,7 +49,6 @@ from .utils import GRISM_COLORS, GRISM_MAJOR, GRISM_LIMITS, DEFAULT_LINE_LIST
 
 def test():
     
-    import glob
     from grizlidev import utils
     import grizlidev.multifit
     
@@ -142,12 +161,6 @@ def _loadFLT(grism_file, sci_extn, direct_file, pad, ref_file,
     
     TBD
     """
-    import time
-    try:
-        import cPickle as pickle
-    except:
-        # Python 3
-        import pickle
         
     ## slight random delay to avoid synchronization problems
     # np.random.seed(ix)
@@ -167,7 +180,7 @@ def _loadFLT(grism_file, sci_extn, direct_file, pad, ref_file,
         save_file = 'xxxxxxxxxxxxxxxxxxx'
         
     if os.path.exists(save_file):
-        print('Load {0}!'.format(save_file))
+        logging.info('Load {0}!'.format(save_file))
         
         fp = open(save_file.replace('GrismFLT.fits', 'GrismFLT.pkl'), 'rb')
         flt = pickle.load(fp)
@@ -201,7 +214,7 @@ def _fit_at_z(self, zgrid, i, templates, fitter, fit_background, poly_order):
     """
     # self, z=0., templates={}, fitter='nnls',
     #              fit_background=True, poly_order=0
-    print(i, zgrid[i])
+    logging.info(i, zgrid[i])
     out = self.fit_at_z(z=zgrid[i], templates=templates,
                         fitter=fitter, poly_order=poly_order,
                         fit_background=fit_background)
@@ -247,10 +260,10 @@ def _compute_model(i, flt, fit_info, is_cgs, store):
                           spectrum_1d = fit_info[id]['spec'], is_cgs=is_cgs, 
                           verbose=False)
         except:
-            print('Failed: {0} {1}'.format(flt.grism.parent_file, id))
+            logging.info('Failed: {0} {1}'.format(flt.grism.parent_file, id))
             continue
             
-    print('{0}: _compute_model Done'.format(flt.grism.parent_file))
+    logging.info('{0}: _compute_model Done'.format(flt.grism.parent_file))
         
     return i, flt.model, flt.object_dispersers
     
@@ -406,7 +419,7 @@ class GroupFLT():
             t1_pool = time.time()
         
         if verbose:
-            print('Files loaded - {0:.2f} sec.'.format(t1_pool - t0_pool))
+            logging.info('Files loaded - {0:.2f} sec.'.format(t1_pool - t0_pool))
     
     def save_full_data(self, warn=True):
         """Save models and data files for fast regeneration.
@@ -445,7 +458,7 @@ class GroupFLT():
             file = self.FLTs[i].grism_file
             if self.FLTs[i].grism.data is None:
                 if warn:
-                    print('{0}: Looks like data already saved!'.format(file))
+                    logging.info('{0}: Looks like data already saved!'.format(file))
                     continue
             
             new_root = '.{0:02d}.GrismFLT.fits'.format(self.FLTs[i].grism.sci_extn)
@@ -454,7 +467,7 @@ class GroupFLT():
             save_file = save_file.replace('_flc.fits', new_root)
             save_file = save_file.replace('_cmb.fits', new_root)
             save_file = save_file.replace('_rate.fits', new_root)
-            print('Save {0}'.format(save_file))
+            logging.info('Save {0}'.format(save_file))
             self.FLTs[i].save_full_pickle()
             
             ### Reload initialized data
@@ -468,7 +481,6 @@ class GroupFLT():
         generate separate `GroupFLT` instances for different grisms and 
         reference images with different filters.
         """
-        import copy
         self.FLTs.extend(new.FLTs)
         self.N = len(self.FLTs)
         
@@ -484,7 +496,7 @@ class GroupFLT():
         # self.grism_files.extend(new.grism_files)
         
         if verbose:
-            print('Now we have {0:d} FLTs'.format(self.N))
+            logging.info('Now we have {0:d} FLTs'.format(self.N))
             
     def compute_single_model(self, id, mag=-99, size=-1, store=False, spectrum_1d=None, is_cgs=False, get_beams=None, in_place=True):
         """Compute model spectrum in all exposures
@@ -569,7 +581,7 @@ class GroupFLT():
             
         t1_pool = time.time()
         if verbose:
-            print('Models computed - {0:.2f} sec.'.format(t1_pool - t0_pool))
+            logging.info('Models computed - {0:.2f} sec.'.format(t1_pool - t0_pool))
         
     def get_beams(self, id, size=10, beam_id='A', min_overlap=0.2, 
                   get_slice_header=True):
@@ -584,15 +596,15 @@ class GroupFLT():
                                         conf=flt.conf, 
                                         get_slice_header=get_slice_header)
             except:
-                #print('Except: get_beams')
+                #logging.info('Except: get_beams')
                 continue
             
             # if flt.grism.pupil == 'f158m':
-            #     print(xxx)
+            #     logging.info(xxx)
             #     pass
                 
             hasdata = ((out_beam.grism['SCI'] != 0).sum(axis=0) > 0).sum()
-            #print(out_beam.grism.pupil, hasdata*1./out_beam.model.shape[1])
+            #logging.info(out_beam.grism.pupil, hasdata*1./out_beam.model.shape[1])
             if hasdata*1./out_beam.model.shape[1] < min_overlap:
                 continue
             
@@ -662,7 +674,7 @@ class GroupFLT():
         
         if (np.abs(mb/fb).max() > max_coeff) | ((~np.isfinite(mb/fb)).sum() > 0) | (np.min(mb) < 0) | ((~np.isfinite(ypoly)).sum() > 0):
             if verbose:
-                print('{0} mag={1:6.2f} {2} xx'.format(id, mag, scale_coeffs))
+                logging.info('{0} mag={1:6.2f} {2} xx'.format(id, mag, scale_coeffs))
 
             return True
         
@@ -677,7 +689,7 @@ class GroupFLT():
                       header=flt.grism.header)
         
         if verbose:
-            print('{0} mag={1:6.2f} {2}'.format(id, mag, scale_coeffs))
+            logging.info('{0} mag={1:6.2f} {2}'.format(id, mag, scale_coeffs))
             
         return True
         #m2d = mb.reshape_flat(modelf)
@@ -708,7 +720,7 @@ class GroupFLT():
         
         if (np.abs(mb/fb).max() > max_coeff) | (~np.isfinite(mb/fb).sum() > 0) | (np.min(mb) < 0):
             if verbose:
-                print('{0} mag={1:6.2f} {2} xx'.format(id, mag, scale_coeffs))
+                logging.info('{0} mag={1:6.2f} {2} xx'.format(id, mag, scale_coeffs))
 
             return True
         
@@ -723,7 +735,7 @@ class GroupFLT():
                       header=flt.grism.header)
         
         if verbose:
-            print('{0} mag={1:6.2f} {2}'.format(id, mag, scale_coeffs))
+            logging.info('{0} mag={1:6.2f} {2}'.format(id, mag, scale_coeffs))
             
         return True
         #m2d = mb.reshape_flat(modelf)
@@ -763,13 +775,13 @@ class GroupFLT():
             Stack figure object.  
                                 
         """
-        print(target, id)
+        logging.info(target, id)
         if os.path.exists('{0}_{1:05d}.stack.png'.format(target, id)) & skip:
             return True
         
         beams = self.get_beams(id, size=size, beam_id='A')
         if len(beams) == 0:
-            print('id = {0}: No beam cutouts available.'.format(id))
+            logging.info('id = {0}: No beam cutouts available.'.format(id))
             return None
             
         mb = MultiBeam(beams, fcontam=fcontam, group_name=target)
@@ -819,9 +831,6 @@ class GroupFLT():
             Drizzle science and weight arrays with dimensions set in
             `ref_header`.
         """
-        from astropy.modeling import models, fitting
-        from drizzlepac.astrodrizzle import adrizzle
-        import astropy.wcs as pywcs
         
         ## Quick check now for which grism exposures we should use
         if wave < 1.1e4:
@@ -917,7 +926,7 @@ class GroupFLT():
             
             # Drizzle it
             if verbose:
-                print('Drizzle {0} to wavelength {1:.2f}'.format(flt.grism.parent_file, wave))
+                logging.info('Drizzle {0} to wavelength {1:.2f}'.format(flt.grism.parent_file, wave))
                                                         
             adrizzle.do_driz(sci, line_wcs, wht, out_wcs, 
                              outsci, outwht, outctx, 1., 'cps', 1,
@@ -1101,7 +1110,7 @@ class MultiBeam(GroupFitter):
         self.beams.extend(new.beams)
         self._parse_beams()
         if verbose:
-            print('Add beams: {0}\n      Now: {1}'.format(new.Ngrism, self.Ngrism))
+            logging.info('Add beams: {0}\n      Now: {1}'.format(new.Ngrism, self.Ngrism))
         
     def write_master_fits(self, verbose=True, get_hdu=False):
         """Store all beams in a single HDU
@@ -1140,7 +1149,7 @@ class MultiBeam(GroupFitter):
         
         outfile = '{0}_{1:05d}.beams.fits'.format(self.group_name, self.id)
         if verbose:
-            print(outfile)
+            logging.info(outfile)
         
         hdu.writeto(outfile, clobber=True)
     
@@ -1161,7 +1170,7 @@ class MultiBeam(GroupFitter):
             beam = model.BeamCutout(fits_file=hdu[i0:i0+Next_i])#Next[i]])
             self.beams.append(beam)
             if verbose:
-                print('{0} {1} {2}'.format(i+1, beam.grism.parent_file, beam.grism.filter))
+                logging.info('{0} {1} {2}'.format(i+1, beam.grism.parent_file, beam.grism.filter))
                 
             i0 += Next_i #6#Next[i]
             
@@ -1173,7 +1182,7 @@ class MultiBeam(GroupFitter):
             root = beam.grism.parent_file.split('.fits')[0]
             outfile = beam.write_fits(root)
             if verbose:
-                print('Wrote {0}'.format(outfile))
+                logging.info('Wrote {0}'.format(outfile))
             
             outfiles.append(outfile)
             
@@ -1185,7 +1194,7 @@ class MultiBeam(GroupFitter):
         self.beams = []
         for file in beam_list:
             if verbose:
-                print(file)
+                logging.info(file)
             
             beam = model.BeamCutout(fits_file=file, conf=conf)
             self.beams.append(beam)
@@ -1251,10 +1260,7 @@ class MultiBeam(GroupFitter):
                  fit_background=True, poly_order=0):
         """TBD
         """
-        import sklearn.linear_model
-        import numpy.linalg
-        import scipy.optimize
-        
+
         #print 'xxx Init poly'
         self.init_poly_coeffs(poly_order=poly_order)
         
@@ -1281,7 +1287,7 @@ class MultiBeam(GroupFitter):
                     igm = eazy.igm.Inoue14()
                     igmz = igm.full_IGM(z, spectrum_1d[0])
                     spectrum_1d[1]*=igmz    
-                    #print('IGM')            
+                    #logging.info('IGM')            
                 except:
                     # No IGM
                     pass
@@ -1327,7 +1333,7 @@ class MultiBeam(GroupFitter):
                 try:
                     out = np.linalg.lstsq(Ax,y)                         
                 except:
-                    print(A.min(), Ax.min(), self.fit_mask.sum(), y.min())
+                    logging.info(A.min(), Ax.min(), self.fit_mask.sum(), y.min())
                     raise ValueError
                     
                 lstsq_coeff, residuals, rank, s = out
@@ -1426,7 +1432,6 @@ class MultiBeam(GroupFitter):
             Flat array of the best fit 2D continuum
         
         """
-        from collections import OrderedDict
 
         ## Covariance matrix for line flux uncertainties
         Ax = A[:,self.fit_mask]
@@ -1531,7 +1536,7 @@ class MultiBeam(GroupFitter):
                 best = key
 
             if verbose:                    
-                print(utils.NO_NEWLINE + '  {0} {1:9.1f} ({2})'.format(key, chi2[i], best))
+                logging.info(utils.NO_NEWLINE + '  {0} {1:9.1f} ({2})'.format(key, chi2[i], best))
         
         ## Best-fit
         temp_i = {best:templates[best]}
@@ -1609,7 +1614,6 @@ class MultiBeam(GroupFitter):
                      fsps_templates=False):
         """TBD
         """
-        from scipy import polyfit, polyval
         
         if zr is None:
             zr = [0.65, 1.6]
@@ -1644,7 +1648,7 @@ class MultiBeam(GroupFitter):
             templates = utils.load_templates(fwhm=fwhm, stars=stars, line_complexes=line_complexes, fsps_templates=fsps_templates)
         else:
             if verbose:
-                print('User templates! N={0} \n'.format(len(templates)))
+                logging.info('User templates! N={0} \n'.format(len(templates)))
             
         NTEMP = len(templates)
         
@@ -1670,12 +1674,12 @@ class MultiBeam(GroupFitter):
                 chi2min = chi2[i]
 
             if verbose:                    
-                print(utils.NO_NEWLINE + '  {0:.4f} {1:9.1f} ({2:.4f})'.format(zgrid[i], chi2[i], zgrid[iz]))
+                logging.info(utils.NO_NEWLINE + '  {0:.4f} {1:9.1f} ({2:.4f})'.format(zgrid[i], chi2[i], zgrid[iz]))
         
-        print('First iteration: z_best={0:.4f}\n'.format(zgrid[iz]))
+        logging.info('First iteration: z_best={0:.4f}\n'.format(zgrid[iz]))
             
         # peaks
-        import peakutils
+        
         # chi2nu = (chi2.min()-chi2)/self.DoF
         # indexes = peakutils.indexes((chi2nu+delta_chi2_threshold)*(chi2nu > -delta_chi2_threshold), thres=0.3, min_dist=20)
         
@@ -1724,7 +1728,7 @@ class MultiBeam(GroupFitter):
                     iz = i
                 
                 if verbose:
-                    print(utils.NO_NEWLINE+'- {0:.4f} {1:9.1f} ({2:.4f}) {3:d}/{4:d}'.format(zgrid_zoom[i], chi2_zoom[i], zgrid_zoom[iz], i+1, NZOOM))
+                    logging.info(utils.NO_NEWLINE+'- {0:.4f} {1:9.1f} ({2:.4f}) {3:d}/{4:d}'.format(zgrid_zoom[i], chi2_zoom[i], zgrid_zoom[iz], i+1, NZOOM))
         
             zgrid = np.append(zgrid, zgrid_zoom)
             chi2 = np.append(chi2, chi2_zoom)
@@ -1736,13 +1740,13 @@ class MultiBeam(GroupFitter):
         coeffs=coeffs[so,:]
 
         if prior is not None:
-            #print('\n\nPrior!\n\n', chi2.min(), prior[1].min())
+            #logging.info('\n\nPrior!\n\n', chi2.min(), prior[1].min())
             interp_prior = np.interp(zgrid, prior[0], prior[1])
             chi2 += interp_prior
         else:
             interp_prior = None
             
-        print(' Zoom iteration: z_best={0:.4f}\n'.format(zgrid[np.argmin(chi2)]))
+        logging.info(' Zoom iteration: z_best={0:.4f}\n'.format(zgrid[np.argmin(chi2)]))
         
         ### Best redshift
         if not stars:
@@ -1879,7 +1883,6 @@ class MultiBeam(GroupFitter):
     def show_redshift_fit(self, fit_data, plot_flambda=True, figsize=[8,5]):
         """TBD
         """
-        import matplotlib.gridspec
         gs = matplotlib.gridspec.GridSpec(2, 1, height_ratios=[0.6,1])
         
         
@@ -2057,7 +2060,6 @@ class MultiBeam(GroupFitter):
         #axc.set_xticklabels([])
         #axc.set_xlabel(r'$\lambda$')
         #axc.set_ylabel(r'$f_\lambda \times 10^{-19}$')
-        from matplotlib.ticker import MultipleLocator
         ax.xaxis.set_major_locator(MultipleLocator(0.1))
         
         labels = np.arange(np.ceil(xmin*10), np.ceil(xmax*10))/10.
@@ -2209,7 +2211,7 @@ class MultiBeam(GroupFitter):
                 continue
 
             if (line_flux/line_err > 4) | (line in force_line):
-                print('Drizzle line -> {0:4s} ({1:.2f} {2:.2f})'.format(line, line_flux/1.e-17, line_err/1.e-17))
+                logging.info('Drizzle line -> {0:4s} ({1:.2f} {2:.2f})'.format(line, line_flux/1.e-17, line_err/1.e-17))
 
                 line_wave_obs = line_wavelengths[line][0]*(1+z_driz)
                 
@@ -2305,7 +2307,7 @@ class MultiBeam(GroupFitter):
                             if lcontam.max() == 0:
                                 continue
 
-                            #print('Mask 4959!')
+                            #logging.info('Mask 4959!')
                             beam.extra_lines += lcontam
                             
                 hdu = drizzle_to_wavelength(self.beams, ra=self.ra, 
@@ -2376,8 +2378,7 @@ class MultiBeam(GroupFitter):
         pixfrac=0.2, kernel='square'
         
         """        
-        import copy
-        
+
         ## Defaults
         pzfit_def, pspec2_def, pline_def = get_redshift_fit_defaults()
             
@@ -2544,7 +2545,6 @@ class MultiBeam(GroupFitter):
     def fit_trace_shift(self, split_groups=True, max_shift=5, tol=1.e-2, verbose=True):
         """TBD
         """
-        import scipy.optimize
         
         if split_groups:
             roots = np.unique([b.grism.parent_file.split('_')[0] for b in self.beams])
@@ -2600,7 +2600,7 @@ class MultiBeam(GroupFitter):
         chi2 = np.sum(((self.scif - modelf)**2*self.ivarf)[self.fit_mask])
 
         if verbose:
-            print(shifts, chi2/self.DoF)
+            logging.info(shifts, chi2/self.DoF)
         
         return chi2/self.DoF    
     
@@ -2609,8 +2609,6 @@ class MultiBeam(GroupFitter):
         
         TBD
         """
-        from matplotlib.ticker import MultipleLocator
-        import pysynphot as S
         
         if usewcs:
             drizzle_function = drizzle_2d_spectrum_wcs
@@ -2754,14 +2752,14 @@ class MultiBeam(GroupFitter):
                 # Line kernel
                 if not usewcs:
                     h = hdu[1].header
-                    #gau = S.GaussianSource(1.e-17, h['CRVAL1'], h['CD1_1']*1)
+                    #gau = pysynphot.GaussianSource(1.e-17, h['CRVAL1'], h['CD1_1']*1)
                     
                     # header keywords scaled to um
                     toA = 1.e4
                     #toA = 1.
                     
-                    gau = S.GaussianSource(1., h['CRVAL1']*toA, h['CD1_1']*toA)
-                    #print('XXX', h['CRVAL1'], h['CD1_1'], h['CRPIX1'], toA, gau.wave[np.argmax(gau.flux)])
+                    gau = pysynphot.GaussianSource(1., h['CRVAL1']*toA, h['CD1_1']*toA)
+                    #logging.info('XXX', h['CRVAL1'], h['CD1_1'], h['CRPIX1'], toA, gau.wave[np.argmax(gau.flux)])
                     for beam in beams:
                         beam.compute_model(spectrum_1d=[gau.wave, gau.flux],
                                            is_cgs=True)
@@ -2779,7 +2777,7 @@ class MultiBeam(GroupFitter):
                                               ds9=None)
                 
                     kern = h_kern[1].data[:,h['CRPIX1']-1-size:h['CRPIX1']-1+size]
-                    #print('XXX', kern.max(), h_kern[1].data.max())
+                    #logging.info('XXX', kern.max(), h_kern[1].data.max())
                     hdu_kern = pyfits.ImageHDU(data=kern, header=h_kern[1].header, name='KERNEL')
                     hdu.append(hdu_kern)
                 else:
@@ -2847,9 +2845,9 @@ class MultiBeam(GroupFitter):
             
             ## Full kernel
             h = hdu[1].header
-            #gau = S.GaussianSource(1.e-17, h['CRVAL1'], h['CD1_1']*1)
+            #gau = pysynphot.GaussianSource(1.e-17, h['CRVAL1'], h['CD1_1']*1)
             toA = 1.e4
-            gau = S.GaussianSource(1., h['CRVAL1']*toA, h['CD1_1']*toA)
+            gau = pysynphot.GaussianSource(1., h['CRVAL1']*toA, h['CD1_1']*toA)
             for beam in all_beams:
                 beam.compute_model(spectrum_1d=[gau.wave, gau.flux],
                                    is_cgs=True)
@@ -3014,8 +3012,7 @@ def drizzle_2d_spectrum(beams, data=None, wlimit=[1.05, 1.75], dlam=50,
         FITS HDUList with the drizzled 2D spectrum and weight arrays
         
     """
-    from drizzlepac.astrodrizzle import adrizzle
-    from astropy import log
+
     log.setLevel('ERROR')
     #log.disable_warnings_logging()
     adrizzle.log.setLevel('ERROR')
@@ -3062,7 +3059,7 @@ def drizzle_2d_spectrum(beams, data=None, wlimit=[1.05, 1.75], dlam=50,
             wht_mask = wht == 0
             med_wht = np.median(wht[~wht_mask])
             wht[wht_mask] = med_wht
-            #print('xx Fill weight: {0}'.format(med_wht))
+            #logging.info('xx Fill weight: {0}'.format(med_wht))
             
         data_i = data[i]*1.
         scl = 1.
@@ -3218,7 +3215,6 @@ def drizzle_to_wavelength(beams, wcs=None, ra=0., dec=0., wave=1.e4, size=5,
         FITS HDUList with the drizzled thumbnail, line and continuum 
         cutouts.
     """
-    from drizzlepac.astrodrizzle import adrizzle
     adrizzle.log.setLevel('ERROR')
     
     # Nothing to do
@@ -3426,9 +3422,6 @@ def show_drizzle_HDU(hdu, diff=True):
         The figure.
 
     """
-    from collections import OrderedDict
-    from matplotlib.gridspec import GridSpec
-    from matplotlib.ticker import MultipleLocator
     
     h0 = hdu[0].header
     NX = h0['NGRISM']
@@ -3489,7 +3482,7 @@ def show_drizzle_HDU(hdu, diff=True):
         ax = fig.add_subplot(gs[NY-1, ig*2+1])
         
         if diff:
-            #print('xx DIFF!')
+            #logging.info('xx DIFF!')
             m = model_i.data
         else:
             m = 0
@@ -3504,7 +3497,7 @@ def show_drizzle_HDU(hdu, diff=True):
         ax.xaxis.set_major_locator(MultipleLocator(GRISM_MAJOR[g]))
         
         for ip in range(grisms[g]):
-            #print(ip, ig)
+            #logging.info(ip, ig)
             pa = h0['{0}{1:02d}'.format(g, ip+1)]
 
             sci_i = hdu['SCI','{0},{1}'.format(g, pa)]
@@ -3600,10 +3593,7 @@ def drizzle_2d_spectrum_wcs(beams, data=None, wlimit=[1.05, 1.75], dlam=50,
         FITS HDUList with the drizzled 2D spectrum and weight arrays
         
     """
-    from drizzlepac.astrodrizzle import adrizzle
-    from stwcs import distortion
-    from astropy import log
-    
+
     log.setLevel('ERROR')
     #log.disable_warnings_logging()
     adrizzle.log.setLevel('ERROR')
