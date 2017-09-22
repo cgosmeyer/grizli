@@ -1,15 +1,32 @@
 """General utilities"""
-import os
-import glob
-from collections import OrderedDict
 
+import copy
+import glob
+import logging
+import numpy as np
+import os
+import re
+import reproject
+import scipy.ndimage as nd
+
+import astropy.constants as const
 import astropy.io.fits as pyfits
 import astropy.wcs as pywcs
+import astropy.stats
 import astropy.table
-
-import numpy as np
-
 import astropy.units as u
+
+from astropy.convolution import Gaussian2DKernel
+from astropy.stats import sigma_clipped_stats, gaussian_fwhm_to_sigma
+from astropy.table import Table
+from astropy.table import Column
+from collections import OrderedDict
+from photutils import detect_threshold, detect_sources, SegmentationImage
+from photutils import source_properties, properties_table
+from scipy.optimize import minimize
+from shapely.geometry import Polygon
+from astropy.coordinates import SkyCoord
+
 
 KMS = u.km/u.s
 FLAMBDA_CGS = u.erg/u.s/u.cm**2/u.angstrom
@@ -71,8 +88,6 @@ def get_flt_info(files=[]):
         Table containing header keywords
         
     """
-    import astropy.io.fits as pyfits
-    from astropy.table import Table
     
     if not files:
         files=glob.glob('*flt.fits')
@@ -110,7 +125,7 @@ def radec_to_targname(ra=0, dec=0, header=None):
     Example:
 
         >>> from grizli.utils import radec_to_targname
-        >>> print(radec_to_targname(ra=10., dec=-10.))
+        >>> logging.info(radec_to_targname(ra=10., dec=-10.))
         j004000-100000
     
     Parameters
@@ -129,10 +144,7 @@ def radec_to_targname(ra=0, dec=0, header=None):
         Target name like jHHMMSS[+-]DDMMSS.
     
     """
-    import astropy.coordinates 
-    import astropy.units as u
-    import re
-    
+
     if header is not None:
         if 'CRVAL1' in header:
             ra, dec = header['CRVAL1'], header['CRVAL2']
@@ -174,7 +186,7 @@ def parse_flt_files(files=[], info=None, uniquename=False, use_visit=False,
         
             >>> flc = 'jbhj64d8q_flc.fits'
             >>> visit_targname = flc[:6]
-            >>> print(visit_targname)
+            >>> logging.info(visit_targname)
             jbhj64
         
         If False, generate a targname for parallel observations based on the
@@ -199,7 +211,7 @@ def parse_flt_files(files=[], info=None, uniquename=False, use_visit=False,
             >>> translate = {'GOODS-SOUTH-': 'goodss-'}
             >>> for k in translate:
             >>>     targname = targname.replace(k, translate[k])
-            >>> print(targname)
+            >>> logging.info(targname)
             goodss-10
         
     Returns
@@ -216,10 +228,10 @@ def parse_flt_files(files=[], info=None, uniquename=False, use_visit=False,
             >>> propstr = flt_filename[1:4]
             >>> visit = flt_filename[4:6]
             >>> # uniquename = False
-            >>> print('{0}-{1:05.1f}-{2}'.format(targname, pa_v3, filter))
+            >>> logging.info('{0}-{1:05.1f}-{2}'.format(targname, pa_v3, filter))
             macs1149.6+2223-032.0-f140w
             >>> # uniquename = True
-            >>> print('{0}-{1:3s}-{2:2s}-{3:05.1f}-{4:s}'.format(targname, propstr, visit, pa_v3, filter))
+            >>> logging.info('{0}-{1:3s}-{2:2s}-{3:05.1f}-{4:s}'.format(targname, propstr, visit, pa_v3, filter))
             macs1149.6+2223-ca5-21-032.0-f140w
         
     filter_list : dict
@@ -353,7 +365,7 @@ def parse_flt_files(files=[], info=None, uniquename=False, use_visit=False,
                     filter_list[filter][angle].extend(visit_list)
                     
                     if uniquename:
-                        print(visit_product, len(visit_list))
+                        logging.info(visit_product, len(visit_list))
                         so = np.argsort(visit_start)
                         exposure_list = np.array(visit_list)[so]
                         #output_list[visit_product.lower()] = visit_list
@@ -363,7 +375,7 @@ def parse_flt_files(files=[], info=None, uniquename=False, use_visit=False,
                         output_list.append(d)
                         
                 if not uniquename:
-                    print(product, len(exposure_list))
+                    logging.info(product, len(exposure_list))
                     so = np.argsort(exposure_start)
                     exposure_list = np.array(exposure_list)[so]
                     #output_list[product.lower()] = exposure_list
@@ -373,7 +385,7 @@ def parse_flt_files(files=[], info=None, uniquename=False, use_visit=False,
     
     ### Get visit footprint from FLT WCS
     if get_footprint:
-        from shapely.geometry import Polygon
+        
         
         N = len(output_list)
         for i in range(N):
@@ -389,7 +401,7 @@ def parse_flt_files(files=[], info=None, uniquename=False, use_visit=False,
                 else:
                     wcs_j = pywcs.WCS(flt_j['SCI',1], fobj=flt_j)
                     
-                fp_j = Polygon(wcs_j.calc_footprint())
+                fp_j = Polygon(wcs_j.calc_footlogging.info())
                 if j == 0:
                     fp_i = fp_j
                 else:
@@ -420,8 +432,7 @@ def parse_visit_overlaps(visits, buffer=15.):
         List of overlapping visits, with similar format as input `visits`.
         
     """
-    import copy
-    from shapely.geometry import Polygon
+
     
     N = len(visits)
 
@@ -435,7 +446,7 @@ def parse_visit_overlaps(visits, buffer=15.):
         
         im_i = pyfits.open(glob.glob(visits[i]['product']+'_dr?_sci.fits')[0])
         wcs_i = pywcs.WCS(im_i[0])
-        fp_i = Polygon(wcs_i.calc_footprint()).buffer(buffer/3600.)
+        fp_i = Polygon(wcs_i.calc_footlogging.info()).buffer(buffer/3600.)
         
         exposure_groups.append(copy.deepcopy(visits[i]))
         
@@ -446,7 +457,7 @@ def parse_visit_overlaps(visits, buffer=15.):
                 
             im_j = pyfits.open(glob.glob(visits[j]['product']+'_dr?_sci.fits')[0])
             wcs_j = pywcs.WCS(im_j[0])
-            fp_j = Polygon(wcs_j.calc_footprint()).buffer(buffer/3600.)
+            fp_j = Polygon(wcs_j.calc_footlogging.info()).buffer(buffer/3600.)
             
             olap = fp_i.intersection(fp_j)
             if olap.area > 0:
@@ -505,7 +516,7 @@ def parse_grism_associations(exposure_groups,
         olap_i = 0.
         d_i = f_i
         
-        #print('\nx\n')
+        #logging.info('\nx\n')
         for j in range(N):
             f_j = exposure_groups[j]['product'].split('-')[-1]
             if f_j.startswith('g'):
@@ -515,7 +526,7 @@ def parse_grism_associations(exposure_groups,
             olap = fp_i.intersection(fp_j)
             root_j = exposure_groups[j]['product'].split('-'+f_j)[0]
 
-            #print(root_j, root_i, root_j == root_i)
+            #logging.info(root_j, root_i, root_j == root_i)
             if (root_j == root_i):
                 if (group['direct'] is not None):
                     pass
@@ -525,18 +536,18 @@ def parse_grism_associations(exposure_groups,
                 group['direct'] = exposure_groups[j]
                 olap_i = olap.area
                 d_i = f_j
-                #print(0,group['grism']['product'], group['direct']['product'])
+                #logging.info(0,group['grism']['product'], group['direct']['product'])
             #     continue
                 
-            #print(exposure_groups[i]['product'], exposure_groups[j]['product'], olap.area*3600.)
+            #logging.info(exposure_groups[i]['product'], exposure_groups[j]['product'], olap.area*3600.)
             
-            #print(exposure_groups[j]['product'], olap_i, olap.area)
+            #logging.info(exposure_groups[j]['product'], olap_i, olap.area)
             if olap.area > 0:
                 if group['direct'] is None:
                     group['direct'] = exposure_groups[j]
                     olap_i = olap.area
                     d_i = f_j
-                    #print(1,group['grism']['product'], group['direct']['product'])
+                    #logging.info(1,group['grism']['product'], group['direct']['product'])
                 else:
                     #if (f_j.upper() == best_direct[f_i.upper()]):
                     if get_max_overlap:
@@ -547,10 +558,10 @@ def parse_grism_associations(exposure_groups,
                             continue
                                 
                     group['direct'] = exposure_groups[j]
-                    #print(exposure_groups[j]['product'])
+                    #logging.info(exposure_groups[j]['product'])
                     olap_i = olap.area
                     d_i = f_j
-                    #print(2,group['grism']['product'], group['direct']['product'])
+                    #logging.info(2,group['grism']['product'], group['direct']['product'])
                     
         grism_groups.append(group)
     
@@ -567,11 +578,11 @@ def get_hst_filter(header):
         >>> h['FILTER1'] = 'CLEAR1L'
         >>> h['FILTER2'] = 'F814W'
         >>> from grizli.utils import get_hst_filter
-        >>> print(get_hst_filter(h))
+        >>> logging.info(get_hst_filter(h))
         F814W
         >>> h['FILTER1'] = 'G800L'
         >>> h['FILTER2'] = 'CLEAR2L'
-        >>> print(get_hst_filter(h))
+        >>> logging.info(get_hst_filter(h))
         G800L
     
     Parameters
@@ -632,7 +643,7 @@ def unset_dq_bits(value, okbits=32+64+512, verbose=False):
     for i in range(n):
         if bin_bits[-(i+1)] == '1':
             if verbose:
-                print(2**i)
+                logging.info(2**i)
             
             value -= (value & 2**i)
     
@@ -682,17 +693,7 @@ def detect_with_photutils(sci, err=None, dq=None, seg=None, detect_thresh=2.,
     catalog : `~astropy.table.Table`
         Object catalog with the default parameters.
     """
-    import scipy.ndimage as nd
-    
-    from photutils import detect_threshold, detect_sources, SegmentationImage
-    from photutils import source_properties, properties_table
-    
-    import astropy.io.fits as pyfits
-    from astropy.table import Column
-    
-    from astropy.stats import sigma_clipped_stats, gaussian_fwhm_to_sigma
-    from astropy.convolution import Gaussian2DKernel
-    
+
     ### DQ masks
     mask = (sci == 0)
     if dq is not None:
@@ -714,7 +715,7 @@ def detect_with_photutils(sci, err=None, dq=None, seg=None, detect_thresh=2.,
         kernel.normalize()
     
         if verbose:
-            print('{0}: photutils.detect_sources (detect_thresh={1:.1f}, grow_seg={2:d}, gauss_fwhm={3:.1f}, ZP={4:.1f})'.format(root, detect_thresh, grow_seg, gauss_fwhm, AB_zeropoint))
+            logging.info('{0}: photutils.detect_sources (detect_thresh={1:.1f}, grow_seg={2:d}, gauss_fwhm={3:.1f}, ZP={4:.1f})'.format(root, detect_thresh, grow_seg, gauss_fwhm, AB_zeropoint))
         
         ### Detect sources
         segm = detect_sources(sci*(~mask), threshold, npixels=npixels,
@@ -728,7 +729,7 @@ def detect_with_photutils(sci, err=None, dq=None, seg=None, detect_thresh=2.,
         
     ### Source properties catalog
     if verbose:
-        print('{0}: photutils.source_properties'.format(root))
+        logging.info('{0}: photutils.source_properties'.format(root))
     
     props = source_properties(sci, segm, error=threshold/detect_thresh,
                               mask=mask, background=background, wcs=wcs)
@@ -756,18 +757,18 @@ def detect_with_photutils(sci, err=None, dq=None, seg=None, detect_thresh=2.,
         
         catalog.rename_column(key, rename_columns[key])
         if verbose:
-            print('Rename column: {0} -> {1}'.format(key, rename_columns[key]))
+            logging.info('Rename column: {0} -> {1}'.format(key, rename_columns[key]))
     
     ### Done!
     if verbose:
-        print(NO_NEWLINE + ('{0}: photutils.source_properties - {1:d} objects'.format(root, len(catalog))))
+        logging.info(NO_NEWLINE + ('{0}: photutils.source_properties - {1:d} objects'.format(root, len(catalog))))
     
     #### Save outputs?
     if save_detection:
         seg_file = root + '.detect_seg.fits'
         seg_cat  = root + '.detect.cat'
         if verbose:
-            print('{0}: save {1}, {2}'.format(root, seg_file, seg_cat))
+            logging.info('{0}: save {1}, {2}'.format(root, seg_file, seg_cat))
         
         if wcs is not None:
             header = wcs.to_header(relax=True)
@@ -787,7 +788,7 @@ def nmad(data):
     """Normalized NMAD=1.48 * `~.astropy.stats.median_absolute_deviation`
     
     """
-    import astropy.stats
+    
     return 1.48*astropy.stats.median_absolute_deviation(data)
 
 def get_line_wavelengths():
@@ -802,9 +803,9 @@ def get_line_wavelengths():
         
             >>> from grizli.utils import get_line_wavelengths
             >>> line_wavelengths, line_ratios = get_line_wavelengths()
-            >>> print(line_wavelengths['Ha'], line_ratios['Ha'])
+            >>> logging.info(line_wavelengths['Ha'], line_ratios['Ha'])
             [6564.61] [1.0]
-            >>> print(line_wavelengths['OIII'], line_ratios['OIII'])
+            >>> logging.info(line_wavelengths['OIII'], line_ratios['OIII'])
             [5008.24, 4960.295] [2.98, 1]
         
         Includes some additional combined line complexes useful for redshift
@@ -813,7 +814,7 @@ def get_line_wavelengths():
             >>> from grizli.utils import get_line_wavelengths
             >>> line_wavelengths, line_ratios = get_line_wavelengths()
             >>> key = 'Ha+SII+SIII+He'
-            >>> print(line_wavelengths[key], '\\n', line_ratios[key])
+            >>> logging.info(line_wavelengths[key], '\\n', line_ratios[key])
             [6564.61, 6718.29, 6732.67, 9068.6, 9530.6, 10830.0]
             [1.0, 0.1, 0.1, 0.05, 0.122, 0.04]
         
@@ -1030,7 +1031,6 @@ class SpectrumTemplate(object):
         wave, flux : array-like
             Wavelength and flux of a Gaussian line
         """
-        import astropy.constants as const
                 
         if hasattr(fwhm, 'unit'):
             rms = fwhm.value/2.35
@@ -1164,7 +1164,7 @@ class SpectrumTemplate(object):
             
             >>> fnu = line.integrate_filter(filter)
             
-            >>> print('AB mag = {0:.3f}'.format(-2.5*np.log10(fnu)-48.6))
+            >>> logging.info('AB mag = {0:.3f}'.format(-2.5*np.log10(fnu)-48.6))
             AB mag = 26.619
             
         """
@@ -1279,7 +1279,7 @@ def load_templates(fwhm=400, line_complexes=True, stars=False,
         #     name = os.path.basename(temp)
         #     #ix = info['file'] == temp
         #     #name='%5s %s' %(info['type'][ix][0][1:], temp.split('.as')[0])
-        #     print(name)
+        #     logging.info(name)
         #     temp_list[name] = utils.SpectrumTemplate(wave=data[0],
         #                                              flux=data[1]/scl)
         
@@ -1473,7 +1473,7 @@ def array_templates(templates, max_R=5000):
         wave = wave[np.isfinite(wave)]
         iter += 1
         clipsum = clip.sum()
-        #print(iter, clipsum)
+        #logging.info(iter, clipsum)
         
     NTEMP = len(templates)
     flux_arr = np.zeros((NTEMP, len(wave)))
@@ -1598,8 +1598,7 @@ def get_wcs_pscale(wcs):
         Pixel scale from `wcs.cd`
         
     """
-    from numpy import linalg
-    det = linalg.det(wcs.wcs.cd)
+    det = np.linalg.det(wcs.wcs.cd)
     pscale = np.sqrt(np.abs(det))*3600.
     return pscale
     
@@ -1686,7 +1685,7 @@ def reproject_faster(input_hdu, output, pad=10, **kwargs):
     `pip`.  See https://reproject.readthedocs.io.
      
     """
-    import reproject
+    
     
     # Output WCS
     if isinstance(output, pywcs.WCS):
@@ -1695,11 +1694,11 @@ def reproject_faster(input_hdu, output, pad=10, **kwargs):
         out_wcs = pywcs.WCS(output, relax=True)
     
     if 'SIP' in out_wcs.wcs.ctype[0]:
-        print('Warning: `reproject` doesn\'t appear to support SIP projection')
+        logging.info('Warning: `reproject` doesn\'t appear to support SIP projection')
         
     # Compute pixel coordinates of the output frame corners in the input image
     input_wcs = pywcs.WCS(input_hdu.header, relax=True)
-    out_fp = out_wcs.calc_footprint()
+    out_fp = out_wcs.calc_footlogging.info()
     input_xy = input_wcs.all_world2pix(out_fp, 0)
     slx = slice(int(input_xy[:,0].min())-pad, int(input_xy[:,0].max())+pad)
     sly = slice(int(input_xy[:,1].min())-pad, int(input_xy[:,1].max())+pad)
@@ -1743,7 +1742,7 @@ def full_spectrum_wcsheader(center_wave=1.4e4, dlam=40, NX=100, spatial_scale=1,
         
         >>> from grizli.utils import make_spectrum_wcsheader
         >>> h, wcs = make_spectrum_wcsheader()
-        >>> print(wcs)
+        >>> logging.info(wcs)
         WCS Keywords
         Number of WCS axes: 2
         CTYPE : 'WAVE'  'LINEAR'  
@@ -1808,7 +1807,7 @@ def make_spectrum_wcsheader(center_wave=1.4e4, dlam=40, NX=100, spatial_scale=1,
         
         >>> from grizli.utils import make_spectrum_wcsheader
         >>> h, wcs = make_spectrum_wcsheader()
-        >>> print(wcs)
+        >>> logging.info(wcs)
         WCS Keywords
         Number of WCS axes: 2
         CTYPE : 'WAVE'  'LINEAR'  
@@ -1904,7 +1903,7 @@ def make_wcsheader(ra=40.07293, dec=-1.6137748, size=2, pixscale=0.1, get_hdu=Fa
     
         >>> from grizli.utils import make_wcsheader
         >>> h, wcs = make_wcsheader()
-        >>> print(wcs)
+        >>> logging.info(wcs)
         WCS Keywords
         Number of WCS axes: 2
         CTYPE : 'RA---TAN'  'DEC--TAN'  
@@ -1916,9 +1915,9 @@ def make_wcsheader(ra=40.07293, dec=-1.6137748, size=2, pixscale=0.1, get_hdu=Fa
         
         >>> from grizli.utils import make_wcsheader
         >>> hdu = make_wcsheader(get_hdu=True)
-        >>> print(hdu.data.shape)
+        >>> logging.info(hdu.data.shape)
         (20, 20)
-        >>> print(hdu.header.tostring)
+        >>> logging.info(hdu.header.tostring)
         XTENSION= 'IMAGE   '           / Image extension                                
         BITPIX  =                  -32 / array data type                                
         NAXIS   =                    2 / number of array dimensions                     
@@ -1987,8 +1986,6 @@ def fetch_hst_calib(file='iref$uc72113oi_pfl.fits',  ftpdir='https://hst-crds.st
     """
     TBD
     """
-    import os
-    
     ref_dir = file.split('$')[0]
     cimg = file.split('{0}$'.format(ref_dir))[1]
     iref_file = os.path.join(os.getenv(ref_dir), cimg)
@@ -1996,7 +1993,7 @@ def fetch_hst_calib(file='iref$uc72113oi_pfl.fits',  ftpdir='https://hst-crds.st
         os.system('curl -o {0} {1}/{2}'.format(iref_file, ftpdir, cimg))
     else:
         if verbose:
-            print('{0} exists'.format(iref_file))
+            logging.info('{0} exists'.format(iref_file))
         
 def fetch_hst_calibs(flt_file, ftpdir='https://hst-crds.stsci.edu/unchecked_get/references/hst/', calib_types=['BPIXTAB', 'CCDTAB', 'OSCNTAB', 'CRREJTAB', 'DARKFILE', 'NLINFILE', 'PFLTFILE', 'IMPHTTAB', 'IDCTAB', 'NPOLFILE'], verbose=True):
     """
@@ -2004,8 +2001,7 @@ def fetch_hst_calibs(flt_file, ftpdir='https://hst-crds.stsci.edu/unchecked_get/
     Fetch necessary calibration files needed for running calwf3 from STScI FTP
     
     Old FTP dir: ftp://ftp.stsci.edu/cdbs/iref/"""
-    import os
-            
+        
     im = pyfits.open(flt_file)
     if im[0].header['INSTRUME'] == 'ACS':
         ref_dir = 'jref'
@@ -2014,7 +2010,7 @@ def fetch_hst_calibs(flt_file, ftpdir='https://hst-crds.stsci.edu/unchecked_get/
         ref_dir = 'iref'
     
     if not os.getenv(ref_dir):
-        print('No ${0} set!  Put it in ~/.bashrc or ~/.cshrc.'.format(ref_dir))
+        logging.info('No ${0} set!  Put it in ~/.bashrc or ~/.cshrc.'.format(ref_dir))
         return False
     
     for ctype in calib_types:
@@ -2022,7 +2018,7 @@ def fetch_hst_calibs(flt_file, ftpdir='https://hst-crds.stsci.edu/unchecked_get/
             continue
             
         if verbose:
-            print('Calib: {0}={1}'.format(ctype, im[0].header[ctype]))
+            logging.info('Calib: {0}={1}'.format(ctype, im[0].header[ctype]))
         
         if im[0].header[ctype] == 'N/A':
             continue
@@ -2035,7 +2031,7 @@ def fetch_default_calibs(ACS=False):
     
     for ref_dir in ['iref','jref']:
         if not os.getenv(ref_dir):
-            print("""
+            logging.info("""
 No ${0} set!  Make a directory and point to it in ~/.bashrc or ~/.cshrc.
 For example,
 
@@ -2062,7 +2058,7 @@ For example,
         fetch_hst_calib(file)
     
     badpix = '{0}/badpix_spars200_Nov9.fits'.format(os.getenv('iref'))
-    print('Extra WFC3/IR bad pixels: {0}'.format(badpix))
+    logging.info('Extra WFC3/IR bad pixels: {0}'.format(badpix))
     if not os.path.exists(badpix):
         os.system('curl -o {0}/badpix_spars200_Nov9.fits https://raw.githubusercontent.com/gbrammer/wfc3/master/data/badpix_spars200_Nov9.fits'.format(os.getenv('iref')))
     
@@ -2072,7 +2068,7 @@ def fetch_config_files(ACS=False):
     """
     cwd = os.getcwd()
     
-    print('Config directory: {0}/CONF'.format(os.getenv('GRIZLI')))
+    logging.info('Config directory: {0}/CONF'.format(os.getenv('GRIZLI')))
     
     os.chdir('{0}/CONF'.format(os.getenv('GRIZLI')))
     
@@ -2090,7 +2086,7 @@ def fetch_config_files(ACS=False):
     for url in tarfiles:
         file=os.path.basename(url)
         if not os.path.exists(file):
-            print('Get {0}'.format(file))
+            logging.info('Get {0}'.format(file))
             os.system('curl -o {0} {1}'.format(file, url))
         
         os.system('tar xzvf {0}'.format(file))
@@ -2100,13 +2096,13 @@ def fetch_config_files(ACS=False):
     for url in files:
         file=os.path.basename(url)
         if not os.path.exists(file):
-            print('Get {0}'.format(file))
+            logging.info('Get {0}'.format(file))
             os.system('curl -o {0} {1}'.format(file, url))
         else:
-            print('File {0} exists'.format(file))
+            logging.info('File {0} exists'.format(file))
     
     # Stellar templates
-    print('Templates directory: {0}/templates'.format(os.getenv('GRIZLI')))
+    logging.info('Templates directory: {0}/templates'.format(os.getenv('GRIZLI')))
     os.chdir('{0}/templates'.format(os.getenv('GRIZLI')))
     
     files = ['http://www.stsci.edu/~brammer/Grizli/Files/stars_pickles.npy',
@@ -2115,12 +2111,12 @@ def fetch_config_files(ACS=False):
     for url in files:
         file=os.path.basename(url)
         if not os.path.exists(file):
-            print('Get {0}'.format(file))
+            logging.info('Get {0}'.format(file))
             os.system('curl -o {0} {1}'.format(file, url))
         else:
-            print('File {0} exists'.format(file))
+            logging.info('File {0} exists'.format(file))
     
-    print('ln -s stars_pickles.npy stars.npy')
+    logging.info('ln -s stars_pickles.npy stars.npy')
     os.system('ln -s stars_pickles.npy stars.npy')
     
     os.chdir(cwd)
@@ -2195,14 +2191,13 @@ class EffectivePSF(object):
         TBD
         """
         # So much faster than scipy.interpolate.griddata!
-        from scipy.ndimage.interpolation import map_coordinates
         
         # ePSF only defined to 12.5 pixels
         ok = (np.abs(dx) < 12.5) & (np.abs(dy) < 12.5)
         coords = np.array([50+4*dx[ok], 50+4*dy[ok]])
         
         # Do the interpolation
-        interp_map = map_coordinates(psf_xy, coords, order=3)
+        interp_map = nd.interpolation.map_coordinates(psf_xy, coords, order=3)
         
         # Fill output data
         out = np.zeros_like(dx, dtype=np.float32)
@@ -2234,7 +2229,6 @@ class EffectivePSF(object):
         """Fit ePSF to input data
         TBD
         """
-        from scipy.optimize import minimize
         
         sh = sci.shape
         if center is None:
@@ -2285,7 +2279,6 @@ class GTable(astropy.table.Table):
         tab : `~astropy.table.Table`
             Table object
         """
-        import astropy.units as u
         
         if format is None:
             if sextractor:
@@ -2293,7 +2286,7 @@ class GTable(astropy.table.Table):
             else:
                 format = 'ascii.commented_header'
         
-        #print(file, format)            
+        #logging.info(file, format)            
         tab = cls.read(file, format=format)
         
         return tab
@@ -2337,8 +2330,6 @@ class GTable(astropy.table.Table):
             pairs found based on `rd_pairs`.
             
         """
-        from collections import OrderedDict
-        import astropy.units as u
         
         if rd_pairs is None:
             rd_pairs = OrderedDict()
@@ -2354,7 +2345,7 @@ class GTable(astropy.table.Table):
                 break
         
         if rd_pair is None:
-            #print('No RA/Dec. columns found in input table.')
+            #logging.info('No RA/Dec. columns found in input table.')
             return False
         
         for c in rd_pair:
@@ -2405,18 +2396,16 @@ class GTable(astropy.table.Table):
                 >>> gaia_match = gaia[close]
         
         """
-        from astropy.coordinates import SkyCoord
-        
         if self_radec is None:
             rd = self.parse_radec_columns(self)
         else:
             rd = self.parse_radec_columns(self, rd_pairs={self_radec[0]:self_radec[1]})
             
         if rd is False:
-            print('No RA/Dec. columns found in input table.')
+            logging.info('No RA/Dec. columns found in input table.')
             return False
             
-        self_coo = SkyCoord(ra=self[rd[0]], dec=self[rd[1]])
+        self_coo = coordinates.SkyCoord(ra=self[rd[0]], dec=self[rd[1]])
 
         if other_radec is None:
             rd = self.parse_radec_columns(other)
@@ -2424,7 +2413,7 @@ class GTable(astropy.table.Table):
             rd = self.parse_radec_columns(other, rd_pairs={other_radec[0]:other_radec[1]})
 
         if rd is False:
-            print('No RA/Dec. columns found in `other` table.')
+            logging.info('No RA/Dec. columns found in `other` table.')
             return False
             
         other_coo = SkyCoord(ra=other[rd[0]], dec=other[rd[1]])
