@@ -1,11 +1,23 @@
 """
 Utilities for fitting stacked (drizzled) spectra
 """
-from collections import OrderedDict
-from imp import reload
 
 import astropy.io.fits as pyfits
+import matplotlib.gridspec
+import matplotlib.pyplot as plt
 import numpy as np
+import os
+import scipy.ndimage as nd
+import scipy.optimize
+
+from collections import OrderedDict
+from imp import reload
+from matplotlib.ticker import MultipleLocator
+from scipy import polyval
+
+import grizli
+import grizli.utils_c as u   
+from grizli.multifit import MultiBeam
 
 from . import utils
 from .utils import GRISM_COLORS, GRISM_MAJOR, GRISM_LIMITS, DEFAULT_LINE_LIST
@@ -36,8 +48,6 @@ def make_templates(grism='G141', return_lists=False, fsps_templates=False,
         
     """
     
-    from grizli.multifit import MultiBeam
-    
     if grism == 'G141':    # WFC3/IR
         fwhm = 1100
     elif grism == 'G800L': # ACS/UVIS
@@ -66,7 +76,7 @@ def make_templates(grism='G141', return_lists=False, fsps_templates=False,
     else:
         # Save them to a file
         np.save('templates_{0}.npy'.format(fwhm), [t_complexes, t_lines])
-        print('Wrote `templates_{0}.npy`'.format(fwhm))
+        logging.info('Wrote `templates_{0}.npy`'.format(fwhm))
 
 class StackFitter(GroupFitter):
     def __init__(self, files='gnt_18197.stack.fits', group_name=None, sys_err=0.02, mask_min=0.1, fit_stacks=True, fcontam=1, pas=None, extensions=None, min_ivar=0.01, overlap_threshold=3, verbose=True, eazyp=None, eazy_ix=0):
@@ -113,7 +123,7 @@ class StackFitter(GroupFitter):
             self.group_name = file
             
         if verbose:
-            print('Load file {0}'.format(file))
+            logging.info('Load file {0}'.format(file))
             
         self.file = file
         self.hdulist = pyfits.open(file)
@@ -341,8 +351,6 @@ class StackFitter(GroupFitter):
             Template coefficients and uncertainties.
         
         """
-        import scipy.optimize
-        
         # Photometry
         ok_phot = (eazyp.efnu[ix,:] > 0) & (eazyp.fnu[ix,:] > eazyp.param['NOT_OBS_THRESHOLD']) & np.isfinite(eazyp.fnu[ix,:]) & np.isfinite(eazyp.efnu[ix,:])
         ok_phot = np.squeeze(ok_phot)
@@ -421,7 +429,7 @@ class StackFitter(GroupFitter):
                 # covardf = np.sqrt(covarf.diagonal()).A.flatten()
                 
             except:
-                print('Except!')
+                logging.info('Except!')
                 covard = np.zeros(oktemp.sum())#-1.
         else:
             covard = np.zeros(oktemp.sum())#-1.
@@ -439,7 +447,7 @@ class StackFitter(GroupFitter):
         """
         Scale spectrum templates by polynomial function
         """
-        from scipy import polyval
+        
         
         scale = np.ones(Ax.shape[1])
         scale[:-Nphot] = polyval(p[::-1]/10., (spec_wave-1.e4)/1000.)
@@ -455,8 +463,6 @@ class StackFitter(GroupFitter):
         Objective function for fitting for a scale term between photometry and 
         spectra
         """
-        import scipy.optimize
-        from scipy import polyval
         
         scale = np.ones(Ax.shape[1])
         scale[:-Nphot] = polyval(p[::-1]/10., (spec_wave-1.e4)/1000.)
@@ -476,7 +482,7 @@ class StackFitter(GroupFitter):
         resid = data/sivarf - full# - background
         chi2 = np.sum(resid[fit_mask]**2*sivarf[fit_mask]**2)
         
-        #print('{0} {1}'.format(p, chi2))
+        #logging.info('{0} {1}'.format(p, chi2))
 
         if return_coeffs:
             return coeffs, full, resid, chi2, AxT
@@ -486,7 +492,7 @@ class StackFitter(GroupFitter):
         # Testing
         # method = 'COBYLA'
         # out = scipy.optimize.minimize(objective_scale, [10.], args=(Ax, dataf*sivarf, fit_mask, sivarf, Nphot, 0), method=method, jac=None, hess=None, hessp=None, bounds=None, constraints=(), tol=None, callback=None, options=None)
-        # print(method, out.nfev, out.x)
+        # logging.info(method, out.nfev, out.x)
         # out = scipy.optimize.minimize(objective_scale, [10.], args=(Ax, dataf*sivarf, fit_mask, sivarf, Nphot, 0), method='COBYLA', jac=None, hess=None, hessp=None, bounds=None, constraints=(), tol=None, callback=None, options=None)
         
     def fit_at_z(self, z=0, templates=[], fitter='nnls', get_uncertainties=False):
@@ -524,8 +530,7 @@ class StackFitter(GroupFitter):
             Template coefficients and uncertainties.
         
         """
-        import scipy.optimize
-        
+
         NTEMP = len(templates)
         A = np.zeros((self.N+NTEMP, self.Ntot))
         A[:self.N,:] += self.A_bg
@@ -580,7 +585,7 @@ class StackFitter(GroupFitter):
                 covar = np.matrix(np.dot(AxT.T, AxT)).I
                 covard = np.sqrt(covar.diagonal()).A.flatten()
             except:
-                print('Except: covar!')
+                logging.info('Except: covar!')
                 covard = np.zeros(oktemp.sum())#-1.
         else:
             covard = np.zeros(oktemp.sum())#-1.
@@ -632,11 +637,6 @@ class StackFitter(GroupFitter):
             Multi-extension FITS file with the result of the redshift fits.
         
         """
-        import os
-        import grizli
-        import matplotlib.gridspec
-        import matplotlib.pyplot as plt
-        import numpy as np
         
         t_complex, t_i = np.load(templates_file)
         
@@ -651,7 +651,7 @@ class StackFitter(GroupFitter):
                 chi2[i], bg, full, coeffs, err = out
             
             if verbose:
-                print('{0:.4f} - {1:10.1f}'.format(z[i], chi2[i]))
+                logging.info('{0:.4f} - {1:10.1f}'.format(z[i], chi2[i]))
         
         # Zoom in on the chi-sq minimum.
         ci = chi2
@@ -683,7 +683,7 @@ class StackFitter(GroupFitter):
                 # ci[i], bg, full, coeffs, err = out
                 
                 if verbose:
-                    print('{0:.4f} - {1:10.1f}'.format(zi[i], ci[i]))
+                    logging.info('{0:.4f} - {1:10.1f}'.format(zi[i], ci[i]))
             
             z = np.append(z, zi)
             chi2 = np.append(chi2, ci)
@@ -706,9 +706,9 @@ class StackFitter(GroupFitter):
             outlier_mask = (resid*self.sivarf < outlier_threshold)
             #outlier_mask &= self.fit_mask
             #self.sivarf[outlier_mask] = 1/resid[outlier_mask]
-            #print('Mask {0} pixels with resid > {1} sigma'.format((outlier_mask).sum(), outlier_threshold))
+            #logging.info('Mask {0} pixels with resid > {1} sigma'.format((outlier_mask).sum(), outlier_threshold))
             
-            print('Mask {0} pixels with resid > {1} sigma'.format((~outlier_mask & self.fit_mask).sum(), outlier_threshold))
+            logging.info('Mask {0} pixels with resid > {1} sigma'.format((~outlier_mask & self.fit_mask).sum(), outlier_threshold))
             self.fit_mask &= outlier_mask
             #self.DoF = self.fit_mask.sum() #(self.ivar > 0).sum()
             self.DoF = int((self.fit_mask*self.weightf).sum())
@@ -785,7 +785,7 @@ class StackFitter(GroupFitter):
                 t.meta['LINE{0:03d}E'.format(il)] = (err[i], 
                             '{0} line flux uncertainty'.format(te[5:]))
                 
-                #print('xxx EW', EW)
+                #logging.info('xxx EW', EW)
                 t.meta['LINE{0:03d}W'.format(il)] = (EW, 
                             '{0} line rest EQW'.format(te[5:]))
                 
@@ -875,7 +875,7 @@ class StackFitter(GroupFitter):
                     continue
                 
                 new_mask = (E.scif - min_grism[grism]) < threshold/E.sivarf                
-                print('Mask {0} additional pixels for ext {1}'.format((~new_mask & E.fit_mask).sum(), E.extver))
+                logging.info('Mask {0} additional pixels for ext {1}'.format((~new_mask & E.fit_mask).sum(), E.extver))
                 
                 E.fit_mask &= new_mask
                             
@@ -893,11 +893,6 @@ class StackFitter(GroupFitter):
             The figure object.
 
         """
-        import matplotlib.pyplot as plt
-        import matplotlib.gridspec
-        from matplotlib.ticker import MultipleLocator
-        
-        import grizli
         
         zfit = grizli.utils.GTable.read(hdu[1])
         z = zfit['z']
@@ -951,7 +946,7 @@ class StackFitter(GroupFitter):
 
                 model = hdu['MODEL', self.ext[i]].data
                 ymax = model[np.isfinite(model)].max()
-                #print('MAX', ymax)
+                #logging.info('MAX', ymax)
             
                 cmap = 'viridis_r'
                 cmap = 'cubehelix_r'
@@ -1048,7 +1043,7 @@ class StackFitter(GroupFitter):
             ax.set_xticks(labels)
             ax.set_xticklabels(labels)
             #ax.set_xticklabels([])
-            #print(labels, wmin, wmax)
+            #logging.info(labels, wmin, wmax)
             
         if show_2d:
             for ax in twod_axes:
@@ -1060,8 +1055,7 @@ class StackFitter(GroupFitter):
                 
 class StackedSpectrum(object):
     def __init__(self, file='gnt_18197.stack.G141.285.fits', sys_err=0.02, mask_min=0.1, extver='G141', mask_threshold=7, fcontam=1., min_ivar=0.001):
-        import grizli
-        
+
         self.sys_err = sys_err
         self.mask_min = mask_min
         self.extver = extver
@@ -1165,8 +1159,7 @@ class StackedSpectrum(object):
         
         xx Dummy parameters ivar & weight
         """
-        import scipy.ndimage as nd
-        
+
         # flatf = self.flat.reshape(self.sh).sum(axis=0)
         # prof = self.flat.reshape(self.sh)/flatf
         # 
@@ -1200,8 +1193,6 @@ class StackedSpectrum(object):
         """
         Initiazize components for generating 2D model
         """
-        import grizli.utils_c as u
-        
         NY = self.sh[0]
         data = np.zeros((self.header['NAXIS1'], self.header['NAXIS2'], self.header['NAXIS1']))
                                             
@@ -1212,7 +1203,7 @@ class StackedSpectrum(object):
             data[j,:,-NY//2+j:] += self.kernel[:, :self.sh[1]-j+NY//2]
         
         for j in range(NY//2, self.sh[1]-NY//2):
-            #print(j)
+            #logging.info(j)
             data[j,:,j-NY//2:j+NY//2] += self.kernel
                 
         self.fit_data = data.reshape(self.sh[1],-1)
@@ -1223,7 +1214,7 @@ class StackedSpectrum(object):
                                 self.conf.sens[self.beam_name]['SENSITIVITY'])
             
             if 'DLAM0' in self.header:
-                #print('xx Header')
+                #logging.info('xx Header')
                 dlam = self.header['DLAM0']
             else:
                 dlam = np.median(np.diff(self.wave))
@@ -1251,7 +1242,6 @@ class StackedSpectrum(object):
         
         xxx is_cgs and in_place are dummy parameters to match `MultiBeam.compute_model`.
         """
-        import grizli.utils_c as u
         if spectrum_1d is None:
             fl = self.wave*0+1
         else:

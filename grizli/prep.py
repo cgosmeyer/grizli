@@ -38,8 +38,12 @@ from sklearn.gaussian_process import GaussianProcess
 from stsci.tools import asnutil
 from stwcs import updatewcs
 
+from . import config
 from . import utils
 from . import model
+
+PATH_RAW = config.raw
+PATH_PERSISTENCE = config.persistence
 
 def check_status():
     """Make sure all files and modules are in place and print some information if they're not
@@ -102,7 +106,7 @@ def go_all():
         asn.create()
         asn.write()
         
-def fresh_flt_file(file, preserve_dq=False, path_raw='../RAW/', verbose=True, 
+def fresh_flt_file(file, preserve_dq=False, path_raw=PATH_RAW, verbose=True, 
     extra_badpix=True, apply_grism_skysub=True, crclean=False, 
     mask_regions=True):
     """Copy "fresh" unmodified version of a data file from some central location
@@ -301,7 +305,7 @@ def fresh_flt_file(file, preserve_dq=False, path_raw='../RAW/', verbose=True,
     if mask_regions:
         apply_region_mask(local_file, dq_value=1024)
     
-def apply_persistence_mask(flt_file, path='../Persistence', dq_value=1024,
+def apply_persistence_mask(flt_file, path=PATH_PERSISTENCE, dq_value=1024,
                            err_threshold=0.6, grow_mask=3, subtract=True,
                            verbose=True):
     """Make a mask for pixels flagged as being affected by persistence
@@ -1367,7 +1371,7 @@ def get_radec_catalog(ra=0., dec=0., radius=3., product='cat', verbose=True, ref
     return radec, ref_catalog
     
 def process_direct_grism_visit(direct={}, grism={}, radec=None,
-                               path_raw='../RAW',
+                               path_raw=PATH_RAW,
                                align_tolerance=5, align_clip=30,
                                align_mag_limits = [14,23],
                                column_average=True, 
@@ -2801,7 +2805,7 @@ def manual_alignment(visit, ds9, reference=None, reference_catalogs=['SDSS', 'PS
     
     """
 
-    im = pyfits.open('../RAW/'+visit['files'][0])
+    im = pyfits.open(PATH_RAW+visit['files'][0])
     ra, dec = im[1].header['CRVAL1'], im[1].header['CRVAL2']
     
     if reference is None:

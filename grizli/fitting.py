@@ -4,14 +4,28 @@ fitting.py
 Created by Gabriel Brammer on 2017-05-19.
 
 """
-import os
-import glob
-
-from collections import OrderedDict
-
-import numpy as np
-
 import astropy.io.fits as pyfits
+import astropy.units as u
+import glob
+import matplotlib.gridspec
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+import scipy.interpolate
+import scipy.optimize
+import scipy.sparse
+
+from astropy.modeling.models import Polynomial2D
+from collections import OrderedDict
+from matplotlib.ticker import MultipleLocator
+from scipy import polyfit, polyval
+
+import grizli
+import grizli.model
+import grizli.multifit
+    
+from grizli.stack import StackFitter
+from grizli.multifit import MultiBeam
 
 from . import utils
 #from .model import BeamCutout
@@ -38,10 +52,6 @@ def run_all(id, t0=None, t1=None, fwhm=1200, zr=[0.65, 1.6], dz=[0.004, 0.0002],
     fwhm=1200; zr=[0.65, 1.6]; dz=[0.004, 0.0002]; group_name='grism'; fit_stacks=True; prior=None; fcontam=0.2; mask_sn_limit=3; fit_beams=True; root=''
     
     """
-    import glob
-    import grizli.multifit
-    from grizli.stack import StackFitter
-    from grizli.multifit import MultiBeam
     
     mb_files = glob.glob('{0}*{1:05d}.beams.fits'.format(root, id))
     st_files = glob.glob('{0}*{1:05d}.stack.fits'.format(root, id))
@@ -250,13 +260,6 @@ def run_all(id, t0=None, t1=None, fwhm=1200, zr=[0.65, 1.6], dz=[0.004, 0.0002],
     return mb, st, fit, tfit, line_hdu
 
 def make_summary_catalog(target='pg0117+213', sextractor='pg0117+213-f140w.cat', include_beam=True):
-    import glob
-    import os
-    import matplotlib.pyplot as plt
-    
-    import astropy.units as u
-    import numpy as np
-    import grizli
         
     keys = {0:['ID','RA','DEC','NINPUT','REDSHIFT','T_G141'],
             1:['CHI2POLY','DOF','CHIMIN','CHIMAX','BIC_POLY','BIC_TEMP','Z02', 'Z16', 'Z50', 'Z84', 'Z97', 'ZWIDTH1', 'ZWIDTH2', 'Z_MAP', 'Z_RISK', 'MIN_RISK'],
@@ -620,8 +623,6 @@ class GroupFitter(object):
             Full covariance
             
         """
-        import scipy.optimize
-        import scipy.sparse
         
         NTEMP = len(templates)
         A = np.zeros((self.N+NTEMP, self.Nmask))
@@ -804,7 +805,6 @@ class GroupFitter(object):
                      fsps_templates=False, get_uncertainties=True):
         """TBD
         """
-        from scipy import polyfit, polyval
         
         if zr is 0:
             stars = True
@@ -983,7 +983,6 @@ class GroupFitter(object):
         """Parse best-fit redshift, etc.
         TBD
         """
-        import scipy.interpolate
         
         # Normalize to min(chi2)/DoF = 1.
         scl_nu = fit['chi2'].min()/self.DoF
@@ -1132,11 +1131,6 @@ class GroupFitter(object):
     def xmake_fit_plot(self, fit, tfit, show_beams=True, bin=0, minor=0.1):
         """TBD
         """
-        import matplotlib.pyplot as plt
-        import matplotlib.gridspec
-        from matplotlib.ticker import MultipleLocator
-        
-        import grizli.model
         
         # Initialize plot window
         Ng = len(self.grisms)
@@ -1329,7 +1323,6 @@ class GroupFitter(object):
         
         TBD
         """
-        import scipy.optimize
         
         if self.Nphot == 0:
             return np.array([10.])
@@ -1360,9 +1353,6 @@ class GroupFitter(object):
         Objective function for fitting for a scale term between photometry and 
         spectra
         """
-        import scipy.optimize
-        from scipy import polyval
-
         scale = self.compute_scale_array(pscale, self.wavef[self.fit_mask])
         scale[-self.Nphot:] = 1.
         Ax = (AxT.T*scale)
@@ -1387,9 +1377,6 @@ class GroupFitter(object):
     def xfit_star(self, tstar=None):
         """Fit stellar templates
         """
-        import matplotlib.pyplot as plt
-        import matplotlib.gridspec
-        from matplotlib.ticker import MultipleLocator
         
         #self = grizli.multifit.MultiBeam('ers-grism_{0:05d}.beams.fits'.format(id), fcontam=0.2, psf=True)
         #self.extend(grizli.multifit.MultiBeam('/Volumes/Pegasus/Grizli/ACS/goodss/Prep/ers-grism-pears_{0:05d}.beams.fits'.format(id), fcontam=0.2))
@@ -1563,8 +1550,7 @@ class GroupFitter(object):
         """
         TBD: split by grism
         """
-        import astropy.units as u
-        
+
         if data.size != self.fit_mask.sum():
             print('`data` has to be sized of masked arrays (self.fit_mask)')
             return False
@@ -1703,7 +1689,6 @@ class GroupFitter(object):
             Flattened, masked background array.
 
         """
-        from astropy.modeling.models import Polynomial2D
         
         # Initialize beam pixel coordinates
         for beam in self.beams:
@@ -1758,9 +1743,7 @@ class GroupFitter(object):
 def show_drizzled_lines(line_hdu, full_line_list=['OII', 'Hb', 'OIII', 'Ha', 'SII', 'SIII'], size_arcsec=2, cmap='cubehelix_r', scale=1., dscale=1):
     """TBD
     """
-    import matplotlib.pyplot as plt
-    from matplotlib.ticker import MultipleLocator
-    
+
     show_lines = []
     for line in full_line_list:
         if line in line_hdu[0].header['HASLINES'].split():

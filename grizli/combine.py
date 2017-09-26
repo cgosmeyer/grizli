@@ -4,15 +4,17 @@ to speed up the spectral processing.
 """
 import copy
 import glob
-
 import numpy as np
-
-import matplotlib.pyplot as plt
 
 import astropy.wcs as pywcs
 import astropy.io.fits as pyfits
+import matplotlib.pyplot as plt
+
+from drizzlepac import astrodrizzle
+from stsci.tools import asnutil
 
 from . import utils
+
 
 def combine_flt(files=[], output='exposures_cmb.fits', grow=1,
                 add_padding=True, pixfrac=0.5, kernel='point',
@@ -59,9 +61,6 @@ def combine_flt(files=[], output='exposures_cmb.fits', grow=1,
     Creates combined images
     
     """
-    import numpy.linalg
-    from stsci.tools import asnutil
-    from drizzlepac import astrodrizzle
     
     ###  `files` is an ASN filename, not  a list of exposures
     if '_asn.fits' in files:
