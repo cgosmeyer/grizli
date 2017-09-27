@@ -1,10 +1,5 @@
 """
-Decorators to setup logging.
-
-Or don't use decorators at all, use a yaml config file.
-
-https://fangpenlin.com/posts/2012/08/26/good-logging-practice-in-python/
-
+Setup logging and decorators to help record metadata.
 
 This perhaps should not even be in my grizli fork, but rather in my 
 imports library.
@@ -17,18 +12,17 @@ import logging
 import os
 import socket
 import sys
+import time
 
+from collections import OrderedDict
 from functools import wraps
 
-#local
-from . import config
 
+LOG_FILE_LOC = config.PATH_LOGS
 
-LOG_FILE_LOC = ''
+#-----------------------------------------------------------------------------#
 
-# -----------------------------------------------------------------------------
-
-def setup_logging(module):
+def setup_logging(module, path_logs='', stdout=True):
     """Setup the logging file.
 
     Authors
@@ -40,27 +34,43 @@ def setup_logging(module):
     ----------
     module : string
         The name of the module being logged.
-
-    stepname : string
-        The name of the pipeline step being logged.
+    path_logs : string
+        Path at which to write log file.
+    stdout : {True, False}
+        Set to True to print to BOTH standard out and logging file.
 
     Outputs
     -------
-        A log file.
-    """
+    A log file.
 
-    log_file = make_log_file(module)
-    global LOG_FILE_LOC
-    LOG_FILE_LOC = log_file
+    References
+    ----------
+    https://stackoverflow.com/questions/14058453/making-python-loggers-output-all-messages-to-stdout-in-addition-to-log
+    """
+    # if user specifies a different location from default, 
+    # supersede the default from config.
+    if path_logs != '':
+        log_file = make_log_file(module, path_logs)
+    else:
+        log_file = make_log_file(module, LOG_FILE_LOC)
+    #global LOG_FILE_LOC
+    #LOG_FILE_LOC = log_file
     print("log file: {}".format(log_file))
     logging.basicConfig(filename=log_file,
                         format='%(asctime)s %(levelname)s: %(message)s',
                         datefmt='%m/%d/%Y %H:%M:%S %p',
                         level=logging.INFO)
 
-# -----------------------------------------------------------------------------
+    # also print to standard out?
+    if stdout:
+        stderrLogger=logging.StreamHandler()
+        stderrLogger.setFormatter(logging.Formatter(logging.BASIC_FORMAT))
+        logging.getLogger().addHandler(stderrLogger)
 
-def make_log_file(module):
+
+#-----------------------------------------------------------------------------#
+
+def make_log_file(module, path_logs):
     """Return the name of the log file based on the module name.
 
     The name of the logfile is a combination of the name of the module
@@ -82,16 +92,15 @@ def make_log_file(module):
     timestamp = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M')
     filename = '{0}_{1}.log'.format(module, timestamp)
 
-    path_to_logs = config.PATH_LOGS
+    if not os.path.isdir(path_logs):
+        os.mkdir(path_logs)
 
-    if not os.path.isdir(path_to_logs):
-        os.mkdir(path_to_logs)
-
-    log_file = os.path.join(path_to_logs, filename)
+    log_file = os.path.join(path_logs, filename)
 
     return log_file
 
-# -----------------------------------------------------------------------------
+
+#-----------------------------------------------------------------------------#
 
 def log_info(func):
     """Decorator to log useful system information.
@@ -181,14 +190,17 @@ def log_metadata(func):
         # Order the current_params dictionary
         # Because I like stuff alphabetical. 
         current_params = OrderedDict(sorted(current_params.items(), key=lambda t: t[0]))
-        
+
         logging.info("")
         logging.info("FUNCTION: {}".format(func_name.upper()))
-        logging.info("PARAMETER : VALUE ")
-        for param, value in current_params['kw'].iteritems():
-            logging.info("    {} : {}".format(param, value))
+        logging.info("   PARAMETER : VALUE ")
+        #for param, value in current_params['kw'].iteritems(): #python 2
+        for param, value in current_params['kw'].items():
+            logging.info("   {} : {}".format(param, value))
         logging.info("")
 
         return func(*a, **kw)
 
     return wrapped
+
+    
