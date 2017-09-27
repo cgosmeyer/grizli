@@ -5,6 +5,12 @@ Pipeline for flexible modeling and extration of slitless spectroscopy
 from .version import __version__
 
 import os
+import sys
+import logging
+
+# Do this so logging still prints to standard out even if don't set a log file
+root = logging.getLogger()
+root.setLevel(logging.INFO)
 
 ## Will get ImportError: No module named disperse" if imported in the repo directory
 # if os.path.exists('README.rst') & os.path.exists('LICENSE.txt'):
