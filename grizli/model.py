@@ -1,25 +1,37 @@
 """
 Model grism spectra in individual FLTs   
 """
-import os
-from collections import OrderedDict
-import copy
-
-import numpy as np
-import scipy.ndimage as nd
-import matplotlib.pyplot as plt
 
 import astropy.io.fits as pyfits
-from astropy.table import Table
+from astropy.table import Column
+import astropy.units as u
 import astropy.wcs as pywcs
+import copy
+import matplotlib.gridspec
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+import pysynphot as S
+import scipy.ndimage as nd
+import scipy.sparse
+import sklearn
+import stwcs
 
-#import stwcs
+from astropy.coordinates import Angle
+from astropy.table import Table
+from collections import OrderedDict
+from drizzlepac import astrodrizzle
 
 ### Helper functions from a document written by Pirzkal, Brammer & Ryan 
-from . import grismconf
-from . import utils
-from .utils_c import disperse
-from .utils_c import interp
+from grizli import grismconf
+from grizli import utils
+from grizli.utils_c import disperse
+from grizli.utils_c import interp
+
+#from . import grismconf
+#from . import utils
+#from .utils_c import disperse
+#from .utils_c import interp
 
 ### Factors for converting HST countrates to Flamba flux densities
 photflam_list = {'F098M': 6.0501324882418389e-20, 
@@ -58,7 +70,6 @@ photplam_list = {'F098M': 9864.722728110915,
 
 ### Demo for computing photflam and photplam with pysynphot
 if False:
-    import pysynphot as S
     n = 1.e-20
     spec = S.FlatSpectrum(n, fluxunits='flam')
     photflam_list = {}
@@ -292,7 +303,7 @@ class GrismDisperser(object):
         try:
             self.flat_index = self.idx[dyc + self.x0[0], self.dxpix]
         except IndexError:
-            #print('Index Error', id, dyc.dtype, self.dxpix.dtype, self.x0[0], self.xc, self.yc, self.beam, self.ytrace_beam.max(), self.ytrace_beam.min())
+            #logging.info('Index Error', id, dyc.dtype, self.dxpix.dtype, self.x0[0], self.xc, self.yc, self.beam, self.ytrace_beam.max(), self.ytrace_beam.min())
             raise IndexError
             
         ###### Trace, wavelength, sensitivity across entire 2D array
@@ -451,7 +462,7 @@ class GrismDisperser(object):
             thumb = self.direct
         else:
             if thumb.shape != self.sh:
-                print("""
+                logging.info("""
 Error: `thumb` must have the same dimensions as the direct image! ({0:d},{1:d})      
                 """.format(self.sh[0], self.sh[1]))
                 return False
@@ -502,13 +513,12 @@ Error: `thumb` must have the same dimensions as the direct image! ({0:d},{1:d})
             
             All are optionally binned in wavelength if `bin` > 1.
         """
-        import scipy.ndimage as nd
                
         if not hasattr(self, 'optimal_profile'):
             self.init_optimal_profile()
             
         if data.shape != self.sh_beam:
-            print("""
+            logging.info("""
 `data` ({0},{1}) must have the same shape as the data array ({2},{3})
             """.format(data.shape[0], data.shape[1], self.sh_beam[0], 
                   self.sh_beam[1]))
@@ -516,7 +526,7 @@ Error: `thumb` must have the same dimensions as the direct image! ({0:d},{1:d})
 
         if not isinstance(ivar, float):
             if ivar.shape != self.sh_beam:
-                print("""
+                logging.info("""
 `ivar` ({0},{1}) must have the same shape as the data array ({2},{3})
                 """.format(ivar.shape[0], ivar.shape[1], self.sh_beam[0], 
                       self.sh_beam[1]))
@@ -840,7 +850,6 @@ class ImageData(object):
             Corresponding parameters for the reference image, if necessary.
             
         """
-        import copy
           
         ### Easy way, get everything from an image HDU list
         if isinstance(hdulist, pyfits.HDUList):
@@ -1103,8 +1112,6 @@ class ImageData(object):
         
     def get_wcs(self):
         """Get WCS from header"""
-        import numpy.linalg
-        import stwcs
         
         if self.wcs_is_lookup:
 
@@ -1132,7 +1139,7 @@ class ImageData(object):
                     
                 wcs = stwcs.wcsutil.hstwcs.HSTWCS(fobj=fobj, ext=0)
             
-            #print('XXX WCS',wcs)
+            #logging.info('XXX WCS',wcs)
                                         
             # Object is a cutout
             if self.is_slice:
@@ -1257,11 +1264,11 @@ class ImageData(object):
         if ((xref.min() < 0) | (yref.min() < 0) | 
             (xref.max() > ref_naxis[0]) | (yref.max() > ref_naxis[1])):
             if verbose:
-                print('Image cutout: x={0}, y={1} [Out of range]'.format(slx, sly))
+                logging.info('Image cutout: x={0}, y={1} [Out of range]'.format(slx, sly))
             return hdu
         else:
             if verbose:
-                print('Image cutout: x={0}, y={1}'.format(slx, sly))
+                logging.info('Image cutout: x={0}, y={1}'.format(slx, sly))
         
         ### Sliced subimage
         slice_wcs = ref_wcs.slice((sly, slx))
@@ -1300,7 +1307,7 @@ class ImageData(object):
             
         pad = np.maximum(np.abs(pad_min), pad_max) + 50
         if verbose:
-            print('{0} / Pad ref HDU with {1:d} pixels'.format(self.parent_file, pad))
+            logging.info('{0} / Pad ref HDU with {1:d} pixels'.format(self.parent_file, pad))
             
         ### Update data array
         sh = hdu.data.shape
@@ -1347,9 +1354,6 @@ class ImageData(object):
         blotted : `np.ndarray`
             Blotted array with the same shape and WCS as `self.data['SCI']`.
         """
-        
-        import astropy.wcs
-        from drizzlepac import astrodrizzle
         
         #ref = pyfits.open(refimage)
         if hdu.data.dtype.type != np.float32:
@@ -1726,7 +1730,6 @@ class GrismFLT(object):
             Associated photometric catalog.  Not required.
             
         """
-        import stwcs.wcsutil
         
         ### Read files
         self.grism_file = grism_file
@@ -1744,7 +1747,7 @@ class GrismFLT(object):
             if (grism_file is None) | (grism_file == ''):
                 self.grism = None
             else:
-                print('\nFile not found: {0}!\n'.format(grism_file))
+                logging.info('\nFile not found: {0}!\n'.format(grism_file))
                 raise IOError
                 
         self.direct_file = direct_file
@@ -1762,7 +1765,7 @@ class GrismFLT(object):
             if (direct_file is None) | (direct_file == ''):
                 self.direct = None
             else:
-                print('\nFile not found: {0}!\n'.format(direct_file))
+                logging.info('\nFile not found: {0}!\n'.format(direct_file))
                 raise IOError
             
         # ### Simulation mode, no grism exposure
@@ -1890,7 +1893,7 @@ class GrismFLT(object):
                                                    verbose=True)
             
         if verbose:
-            print('{0} / blot reference {1}'.format(self.direct_file, ref_str))
+            logging.info('{0} / blot reference {1}'.format(self.direct_file, ref_str))
                                               
         blotted_ref = self.grism.blot_from_hdu(hdu=ref_hdu,
                                       segmentation=False, interp='poly5')
@@ -1905,14 +1908,14 @@ class GrismFLT(object):
                 try:
                     header_values[key] = ref_hdu.header[key]*1.
                 except TypeError:
-                    print('Problem processing header keyword {0}: ** {1} **'.format(key, ref_hdu.header[key]))
+                    logging.info('Problem processing header keyword {0}: ** {1} **'.format(key, ref_hdu.header[key]))
                     raise TypeError
             else:
                 filt = self.direct.ref_filter
                 if filt in key_list[key]:
                     header_values[key] = key_list[key][filt]
                 else:
-                    print('Filter "{0}" not found in {1} tabulated list'.format(filt, key))
+                    logging.info('Filter "{0}" not found in {1} tabulated list'.format(filt, key))
                     raise IndexError
         
         # Found keywords
@@ -2010,7 +2013,7 @@ class GrismFLT(object):
             seg_hdu = self.direct.expand_hdu(seg_hdu)
             
             if verbose:
-                print('{0} / blot segmentation {1}'.format(self.direct_file, seg_str))
+                logging.info('{0} / blot segmentation {1}'.format(self.direct_file, seg_str))
             
             blotted_seg = self.grism.blot_from_hdu(hdu=seg_hdu, 
                                           segmentation=True, grow=3,
@@ -2025,8 +2028,6 @@ class GrismFLT(object):
         Compute exact PA of the dispersion axis, including tilt of the 
         trace and the FLT WCS
         """
-        from astropy.coordinates import Angle
-        import astropy.units as u
                     
         ### extra tilt of the 1st order grism spectra
         x0 =  self.conf.conf['BEAMA']
@@ -2141,7 +2142,7 @@ class GrismFLT(object):
                 ix = self.catalog['id'] == id
                 if ix.sum() == 0:
                     if verbose:
-                        print('ID {0:d} not found in segmentation image'.format(id))
+                        logging.info('ID {0:d} not found in segmentation image'.format(id))
                     return False
                 
                 xcat = self.catalog['x_flt'][ix][0]-1
@@ -2157,7 +2158,7 @@ class GrismFLT(object):
                 ymin, ymax, y, xmin, xmax, x, area, segm_flux = out
                 if (area == 0) | ~np.isfinite(x) | ~np.isfinite(y):
                     if verbose:
-                        print('ID {0:d} not found in segmentation image'.format(id))
+                        logging.info('ID {0:d} not found in segmentation image'.format(id))
                     return False
                 
                 ### Object won't disperse spectrum onto the grism image
@@ -2213,7 +2214,7 @@ class GrismFLT(object):
                                                         np.array(thumb.shape))
             if test[-2] == 0:
                 if verbose:
-                    print('ID {0:d} not found in segmentation image'.format(id))
+                    logging.info('ID {0:d} not found in segmentation image'.format(id))
                 return False
             
             ### Compute spectral orders ("beams")
@@ -2304,7 +2305,7 @@ class GrismFLT(object):
         ### segmentation regions.
         if mags is None:                                
             if verbose:
-                print('Compute IDs/mags')
+                logging.info('Compute IDs/mags')
             
             mags = np.zeros(len(ids))
             for i, id in enumerate(ids):
@@ -2329,7 +2330,7 @@ class GrismFLT(object):
         ### Now compute the full model
         for id_i, mag_i in zip(ids, mags):
             if verbose:
-                print(utils.NO_NEWLINE + 'compute model id={0:d}'.format(id_i))
+                logging.info(utils.NO_NEWLINE + 'compute model id={0:d}'.format(id_i))
                 
             self.compute_model_orders(id=id_i, compute_size=True, mag=mag_i, 
                                       in_place=True, store=store)
@@ -2353,8 +2354,6 @@ class GrismFLT(object):
         -------
         Nothing, but pixels are masked in `self.grism.data['SCI']`.
         """
-        import scipy.ndimage as nd
-        
         mask = self.grism['SCI'] != 0
         resid = (self.grism['SCI'] - self.model)*mask
         sm = nd.gaussian_filter(np.abs(resid), gaussian_width)
@@ -2391,8 +2390,6 @@ class GrismFLT(object):
             catalogs.
             
         """
-        from astropy.table import Column
-        
         if sextractor:
             columns = ['NUMBER', 'X_WORLD', 'Y_WORLD']
             
@@ -2501,7 +2498,7 @@ class GrismFLT(object):
             if (self.direct.data['REF'] is not None):
                 err = None
             else:
-                print('No reference data found for `self.direct.data[\'REF\']`')
+                logging.info('No reference data found for `self.direct.data[\'REF\']`')
                 return False
                 
         go_detect = utils.detect_with_photutils    
@@ -2537,7 +2534,7 @@ class GrismFLT(object):
             seg_file = root + '.detect_seg.fits'
         
         if not os.path.exists(seg_file):
-            print('Segmentation image {0} not found'.format(segfile))
+            logging.info('Segmentation image {0} not found'.format(segfile))
             return False
         
         self.seg = np.cast[np.float32](pyfits.open(seg_file)[0].data)
@@ -2546,7 +2543,7 @@ class GrismFLT(object):
             seg_cat = root + '.detect.cat'
         
         if not os.path.exists(seg_cat):
-            print('Segmentation catalog {0} not found'.format(seg_cat))
+            logging.info('Segmentation catalog {0} not found'.format(seg_cat))
             return False
         
         self.catalog = Table.read(seg_cat, format=catalog_format)
@@ -2604,7 +2601,7 @@ class GrismFLT(object):
         fp.close()
         
         if verbose:
-            print('Saved {0}_model.fits and {0}_model.pkl'.format(root))
+            logging.info('Saved {0}_model.fits and {0}_model.pkl'.format(root))
     
     def save_full_pickle(self, verbose=True):
         """Save entire `GrismFLT` object to a pickle
@@ -2674,7 +2671,7 @@ class GrismFLT(object):
                 hwcs.writeto(wcsfile, overwrite=overwrite)
         
             if verbose:
-                print(wcsfile)
+                logging.info(wcsfile)
             
     def load_from_fits(self, save_file):
         """Load saved data from a FITS file
@@ -2737,7 +2734,7 @@ class GrismFLT(object):
                 
         self.is_rotated = not self.is_rotated
         if verbose:
-            print('Transform NIRISS: flip={0}'.format(self.is_rotated))
+            logging.info('Transform NIRISS: flip={0}'.format(self.is_rotated))
         
         ### Compute new CRPIX coordinates
         center = np.array(self.grism.sh)/2.+0.5
@@ -2777,10 +2774,10 @@ class GrismFLT(object):
         self.seg = np.rot90(self.seg, rot)
         self.model = np.rot90(self.model, rot)
 
-        #print('xx Rotate images {0}'.format(rot))
+        #logging.info('xx Rotate images {0}'.format(rot))
         
         if self.catalog is not None:
-            #print('xx Rotate catalog {0}'.format(rot))
+            #logging.info('xx Rotate catalog {0}'.format(rot))
             self.catalog = self.blot_catalog(self.catalog, 
                           sextractor=('X_WORLD' in self.catalog.colnames))
     
@@ -2803,8 +2800,6 @@ class GrismFLT(object):
         Sets `self.has_edge_mask = True`.
         
         """
-        import scipy.ndimage as nd
-        
         if (self.has_edge_mask) & (force == False):
             return True
             
@@ -3409,8 +3404,6 @@ class BeamCutout(object):
         dispersion_PA : float
             PA (angle East of North) of the dispersion axis.
         """
-        from astropy.coordinates import Angle
-        import astropy.units as u
                     
         ### extra tilt of the 1st order grism spectra
         x0 =  self.beam.conf.conf['BEAMA']
@@ -3439,7 +3432,6 @@ class BeamCutout(object):
         """Initialize ePSF fitting for point sources
         TBD
         """
-        import scipy.sparse
         
         EPSF = utils.EffectivePSF()
         ivar = 1/self.direct['ERR']**2
@@ -3726,7 +3718,7 @@ class BeamCutout(object):
     #     
     #     ### LSTSQ coefficients
     #     if fitter == 'lstsq':
-    #         out = numpy.linalg.lstsq(A[self.fit_mask, :][:, ok_temp],
+    #         out = np.linalg.lstsq(A[self.fit_mask, :][:, ok_temp],
     #                                  self.scif[self.fit_mask])
     #         lstsq_coeff, residuals, rank, s = out
     #         coeffs = lstsq_coeff
@@ -3799,7 +3791,7 @@ class BeamCutout(object):
     #         
     #         A, coeffs[i,:], chi2[i], model_2d = out
     #         if verbose:
-    #             print(utils.NO_NEWLINE + '{0:.4f} {1:9.1f}'.format(zgrid[i], chi2[i]))
+    #             logging.info(utils.NO_NEWLINE + '{0:.4f} {1:9.1f}'.format(zgrid[i], chi2[i]))
     #     
     #     # peaks
     #     import peakutils
@@ -3828,7 +3820,7 @@ class BeamCutout(object):
     # 
     #         A, coeffs_zoom[i,:], chi2_zoom[i], model_2d = out
     #         if verbose:
-    #             print(utils.NO_NEWLINE + '- {0:.4f} {1:9.1f}'.format(zgrid_zoom[i], chi2_zoom[i]))
+    #             logging.info(utils.NO_NEWLINE + '- {0:.4f} {1:9.1f}'.format(zgrid_zoom[i], chi2_zoom[i]))
     # 
     #     zgrid = np.append(zgrid, zgrid_zoom)
     #     chi2 = np.append(chi2, chi2_zoom)
@@ -3913,7 +3905,6 @@ class BeamCutout(object):
         fig : `~matplotlib.figure.Figure`
             Figure object that can be optionally written to a hardcopy file.
         """
-        import matplotlib.gridspec
         
         #zgrid, A, coeffs, chi2, model_best, model_continuum, model1d = fit_outputs
         
@@ -4081,8 +4072,6 @@ class BeamCutout(object):
             Emission line flux where chi2 is minimized
         """        
         ### Test fit
-        import sklearn.linear_model
-        import numpy.linalg
         clf = sklearn.linear_model.LinearRegression()
                 
         ### Continuum
@@ -4129,7 +4118,7 @@ class BeamCutout(object):
                                                  
             A[:,-1] = self.model.flatten()
             if fitter == 'lstsq':
-                out = numpy.linalg.lstsq(A[ok_data,:], scif[ok_data])
+                out = np.linalg.lstsq(A[ok_data,:], scif[ok_data])
                 lstsq_coeff, residuals, rank, s = out
                 coeffs[i,:] += lstsq_coeff
                 model = np.dot(A, lstsq_coeff)
@@ -4179,7 +4168,6 @@ class BeamCutout(object):
         fig : `~matplotlib.figure.Figure`
             Figure object that can be optionally written to a hardcopy file.
         """
-        import matplotlib.gridspec
         
         line_centers, coeffs, chi2, ok_data, best_model, best_model_cont, best_line_center, best_line_flux = fit_outputs
         

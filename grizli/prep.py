@@ -38,12 +38,12 @@ from sklearn.gaussian_process import GaussianProcess
 from stsci.tools import asnutil
 from stwcs import updatewcs
 
-from . import config
-from . import utils
-from . import model
+from grizli import config
+from grizli import utils
+from grizli import model
 
-PATH_RAW = config.raw
-PATH_PERSISTENCE = config.persistence
+PATH_RAW = config.PATH_RAW 
+PATH_PERSISTENCE = config.PATH_PERSISTENCE
 
 def check_status():
     """Make sure all files and modules are in place and print some information if they're not

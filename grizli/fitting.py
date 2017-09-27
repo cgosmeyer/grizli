@@ -23,13 +23,12 @@ from scipy import polyfit, polyval
 import grizli
 import grizli.model
 import grizli.multifit
-    
-from grizli.stack import StackFitter
-from grizli.multifit import MultiBeam
 
-from . import utils
+from grizli.utils import GRISM_COLORS
+
+#from . import utils
 #from .model import BeamCutout
-from .utils import GRISM_COLORS
+#from .utils import GRISM_COLORS
 
 # Minimum redshift where IGM is applied
 IGM_MINZ = 4
@@ -52,7 +51,9 @@ def run_all(id, t0=None, t1=None, fwhm=1200, zr=[0.65, 1.6], dz=[0.004, 0.0002],
     fwhm=1200; zr=[0.65, 1.6]; dz=[0.004, 0.0002]; group_name='grism'; fit_stacks=True; prior=None; fcontam=0.2; mask_sn_limit=3; fit_beams=True; root=''
     
     """
-    
+    from grizli.stack import StackFitter
+    from grizli.multifit import MultiBeam    
+
     mb_files = glob.glob('{0}*{1:05d}.beams.fits'.format(root, id))
     st_files = glob.glob('{0}*{1:05d}.stack.fits'.format(root, id))
     

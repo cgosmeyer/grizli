@@ -36,15 +36,24 @@ from scipy import polyfit, polyval
 from stwcs import distortion
 
 ## local imports
-from . import grismconf
-from . import utils
-from . import model
-#from . import stack
-from .fitting import GroupFitter
-from .utils_c import disperse
-from .utils_c import interp
+from grizli import grismconf
+from grizli import utils
+from grizli import model
+#from grizli import stack
+from grizli.fitting import GroupFitter
+from grizli.utils_c import disperse
+from grizli.utils_c import interp
+from grizli.utils import GRISM_COLORS, GRISM_MAJOR, GRISM_LIMITS, DEFAULT_LINE_LIST
 
-from .utils import GRISM_COLORS, GRISM_MAJOR, GRISM_LIMITS, DEFAULT_LINE_LIST
+#from . import grismconf
+#from . import utils
+#from . import model
+##from . import stack
+#from .fitting import GroupFitter
+#from .utils_c import disperse
+#from .utils_c import interp
+
+#from .utils import GRISM_COLORS, GRISM_MAJOR, GRISM_LIMITS, DEFAULT_LINE_LIST
 
 
 def test():
@@ -596,7 +605,7 @@ class GroupFLT():
                                         conf=flt.conf, 
                                         get_slice_header=get_slice_header)
             except:
-                #logging.info('Except: get_beams')
+                logging.info('Except: get_beams. Failed at model.BeamCutout for FLT {}, beam {}.'.format(flt, beam[beam_id]))
                 continue
             
             # if flt.grism.pupil == 'f158m':

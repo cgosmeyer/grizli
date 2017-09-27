@@ -17,12 +17,13 @@ from scipy import polyval
 
 import grizli
 import grizli.utils_c as u   
-from grizli.multifit import MultiBeam
 
-from . import utils
-from .utils import GRISM_COLORS, GRISM_MAJOR, GRISM_LIMITS, DEFAULT_LINE_LIST
+from grizli.utils import GRISM_COLORS, GRISM_MAJOR, GRISM_LIMITS, DEFAULT_LINE_LIST
+from grizli.fitting import GroupFitter
+#from . import utils
+#from .utils import GRISM_COLORS, GRISM_MAJOR, GRISM_LIMITS, DEFAULT_LINE_LIST
 
-from .fitting import GroupFitter
+#from .fitting import GroupFitter
 
 def make_templates(grism='G141', return_lists=False, fsps_templates=False,
                    line_list=DEFAULT_LINE_LIST):
