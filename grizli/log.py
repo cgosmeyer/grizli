@@ -53,19 +53,24 @@ def setup_logging(module, path_logs='', stdout=True):
         log_file = make_log_file(module, path_logs)
     else:
         log_file = make_log_file(module, LOG_FILE_LOC)
-    #global LOG_FILE_LOC
-    #LOG_FILE_LOC = log_file
+
     print("log file: {}".format(log_file))
-    logging.basicConfig(filename=log_file,
+
+    root = logging.getLogger()
+    l = logging.basicConfig(filename=log_file,
                         format='%(asctime)s %(levelname)s: %(message)s',
                         datefmt='%m/%d/%Y %H:%M:%S %p',
                         level=logging.INFO)
 
+    # Add to root logger so that in addition to printing to standard out
+    # (default set in __init__.py) also prints to logging file.
+    root.addHandler(l)
+
     # also print to standard out?
-    if stdout:
-        stderrLogger=logging.StreamHandler()
-        stderrLogger.setFormatter(logging.Formatter(logging.BASIC_FORMAT))
-        logging.getLogger().addHandler(stderrLogger)
+    #if stdout:
+    #    stderrLogger=logging.StreamHandler()
+    #    stderrLogger.setFormatter(logging.Formatter(logging.BASIC_FORMAT))
+    #    logging.getLogger().addHandler(stderrLogger)
 
 
 #-----------------------------------------------------------------------------#
@@ -203,4 +208,3 @@ def log_metadata(func):
 
     return wrapped
 
-    
