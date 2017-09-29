@@ -6,7 +6,10 @@ import logging
 import numpy as np
 import os
 import re
-import reproject
+try:
+    import reproject
+except:
+    print("pip install reprojct")
 import scipy.ndimage as nd
 
 import astropy.constants as const
@@ -24,7 +27,10 @@ from collections import OrderedDict
 from photutils import detect_threshold, detect_sources, SegmentationImage
 from photutils import source_properties, properties_table
 from scipy.optimize import minimize
-from shapely.geometry import Polygon
+#try:
+#    from shapely.geometry import Polygon
+#except:
+#    print("Problem importing shapely.geometry")
 from astropy.coordinates import SkyCoord
 
 
@@ -365,7 +371,8 @@ def parse_flt_files(files=[], info=None, uniquename=False, use_visit=False,
                     filter_list[filter][angle].extend(visit_list)
                     
                     if uniquename:
-                        logging.info(visit_product, len(visit_list))
+                        logging.info(visit_product)
+                        logging.info(len(visit_list))
                         so = np.argsort(visit_start)
                         exposure_list = np.array(visit_list)[so]
                         #output_list[visit_product.lower()] = visit_list
@@ -375,7 +382,8 @@ def parse_flt_files(files=[], info=None, uniquename=False, use_visit=False,
                         output_list.append(d)
                         
                 if not uniquename:
-                    logging.info(product, len(exposure_list))
+                    logging.info(product) 
+                    logging.info(len(exposure_list))
                     so = np.argsort(exposure_start)
                     exposure_list = np.array(exposure_list)[so]
                     #output_list[product.lower()] = exposure_list

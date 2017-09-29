@@ -10,7 +10,7 @@ import astropy.wcs as pywcs
 import copy
 import glob
 import lacosmicx
-import logging # hooboy
+import logging
 import matplotlib.pyplot as plt
 import numpy as np
 import os

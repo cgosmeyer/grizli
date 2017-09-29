@@ -7,6 +7,7 @@ from astropy.table import Column
 import astropy.units as u
 import astropy.wcs as pywcs
 import copy
+import logging
 import matplotlib.gridspec
 import matplotlib.pyplot as plt
 import numpy as np

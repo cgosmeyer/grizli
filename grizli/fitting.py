@@ -7,6 +7,7 @@ Created by Gabriel Brammer on 2017-05-19.
 import astropy.io.fits as pyfits
 import astropy.units as u
 import glob
+import logging
 import matplotlib.gridspec
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,6 +25,8 @@ import grizli
 import grizli.model
 import grizli.multifit
 
+from grizli import utils
+from grizli.model import BeamCutout
 from grizli.utils import GRISM_COLORS
 
 #from . import utils
@@ -54,6 +57,7 @@ def run_all(id, t0=None, t1=None, fwhm=1200, zr=[0.65, 1.6], dz=[0.004, 0.0002],
     from grizli.stack import StackFitter
     from grizli.multifit import MultiBeam    
 
+    logging.info("test")
     mb_files = glob.glob('{0}*{1:05d}.beams.fits'.format(root, id))
     st_files = glob.glob('{0}*{1:05d}.stack.fits'.format(root, id))
     

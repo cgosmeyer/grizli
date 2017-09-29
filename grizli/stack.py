@@ -3,6 +3,7 @@ Utilities for fitting stacked (drizzled) spectra
 """
 
 import astropy.io.fits as pyfits
+import logging
 import matplotlib.gridspec
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,6 +25,7 @@ from grizli.fitting import GroupFitter
 #from .utils import GRISM_COLORS, GRISM_MAJOR, GRISM_LIMITS, DEFAULT_LINE_LIST
 
 #from .fitting import GroupFitter
+
 
 def make_templates(grism='G141', return_lists=False, fsps_templates=False,
                    line_list=DEFAULT_LINE_LIST):
