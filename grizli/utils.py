@@ -9,7 +9,7 @@ import re
 try:
     import reproject
 except:
-    print("pip install reprojct")
+    print("pip install reproject")
 import scipy.ndimage as nd
 
 import astropy.constants as const
@@ -1878,7 +1878,8 @@ def to_header(wcs, relax=True):
     
     return header
     
-def make_wcsheader(ra=40.07293, dec=-1.6137748, size=2, pixscale=0.1, get_hdu=False, theta=0):
+def make_wcsheader(ra=40.07293, dec=-1.6137748, size=2, pixscale=0.1, 
+    get_hdu=False, theta=0):
     """Make a celestial WCS header
         
     Parameters
@@ -1990,13 +1991,17 @@ def make_wcsheader(ra=40.07293, dec=-1.6137748, size=2, pixscale=0.1, get_hdu=Fa
     else:
         return hout, wcs_out
     
-def fetch_hst_calib(file='iref$uc72113oi_pfl.fits',  ftpdir='https://hst-crds.stsci.edu/unchecked_get/references/hst/', verbose=True):
+def fetch_hst_calib(file='iref$uc72113oi_pfl.fits',  
+    ftpdir='https://hst-crds.stsci.edu/unchecked_get/references/hst/', 
+    verbose=True, path=None):
     """
     TBD
     """
     ref_dir = file.split('$')[0]
     cimg = file.split('{0}$'.format(ref_dir))[1]
-    iref_file = os.path.join(os.getenv(ref_dir), cimg)
+    if path == None:
+        path=os.getenv(ref_dir)
+    iref_file = os.path.join(path, cimg)
     if not os.path.exists(iref_file):
         os.system('curl -o {0} {1}/{2}'.format(iref_file, ftpdir, cimg))
     else:
@@ -2035,11 +2040,12 @@ def fetch_hst_calibs(flt_file, ftpdir='https://hst-crds.stsci.edu/unchecked_get/
             
     return True
     
-def fetch_default_calibs(ACS=False):
+def fetch_default_calibs(ACS=False, iref_path=None, jref_path=None):
     
-    for ref_dir in ['iref','jref']:
-        if not os.getenv(ref_dir):
-            logging.info("""
+    for ref_dir, ref_path in zip(['iref','jref'], [iref_path, jref_path]):
+        if ref_path == None:
+            if not os.getenv(ref_dir):
+                print("""
 No ${0} set!  Make a directory and point to it in ~/.bashrc or ~/.cshrc.
 For example,
 
@@ -2047,7 +2053,7 @@ For example,
   $ export {0}="${GRIZLI}/{0}/" # put this in ~/.bashrc
 """.format(ref_dir))
 
-            return False
+                return False
         
     ### WFC3
     files = ['iref$uc72113oi_pfl.fits', #F105W Flat
@@ -2056,19 +2062,26 @@ For example,
              'iref$u4m1335mi_pfl.fits', #G141 flat
              'iref$w3m18525i_idc.fits', #IDCTAB distortion table}
              ]
-    
-    if ACS:
-        files.extend(['jref$n6u12592j_pfl.fits',#F814 Flat
-                      'jref$o841350mj_pfl.fits', #G800L flat])
-                      ])
-    
+
     for file in files:
-        fetch_hst_calib(file)
+        fetch_hst_calib(file, path=iref_path)
+  
+    if ACS:
+        files = ['jref$n6u12592j_pfl.fits',#F814 Flat
+                      'jref$o841350mj_pfl.fits', #G800L flat])
+                ]
     
-    badpix = '{0}/badpix_spars200_Nov9.fits'.format(os.getenv('iref'))
-    logging.info('Extra WFC3/IR bad pixels: {0}'.format(badpix))
+        for file in files:
+            fetch_hst_calib(file, path=jref_path)
+    
+    if iref_path == None:
+        iref_path = os.getenv('iref')
+
+    badpix = '{0}/badpix_spars200_Nov9.fits'.format(iref_path)
+    print('Extra WFC3/IR bad pixels: {0}'.format(badpix))
     if not os.path.exists(badpix):
-        os.system('curl -o {0}/badpix_spars200_Nov9.fits https://raw.githubusercontent.com/gbrammer/wfc3/master/data/badpix_spars200_Nov9.fits'.format(os.getenv('iref')))
+        os.system('curl -o {0}/badpix_spars200_Nov9.fits https://raw.githubusercontent.com/gbrammer/wfc3/master/data/badpix_spars200_Nov9.fits'\
+            .format(iref_path))
     
 def fetch_config_files(ACS=False):
     """
