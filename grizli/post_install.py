@@ -82,11 +82,11 @@ def post_install():
         .format(os.path.join(path_GRIZLI, 'templates')))
     print(" ")
     print("INSTALLATION COMPLETE")
+    print(time.ctime())
+    print("Remember to do 'source ~/.bashrc'")
     print(" ")
     print("You should feel free to rearrange directories and change paths ")
     print("in the .bashrc as you see fit.")
-    print(time.ctime())
-
 
 
 if __name__=='__main__':

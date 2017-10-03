@@ -3,7 +3,7 @@
 
 # ASSUMPTIONS:
 # 1. in anaconda (preferably with astroconda distribution), and therefore bash
-# 2. python 3
+# 2. python 3 (for sewpy)
 
 from setuptools import setup
 from setuptools.extension import Extension
@@ -11,7 +11,6 @@ from setuptools.extension import Extension
 import os
 import numpy
 import pip
-import subprocess
 
 try:
     from Cython.Build import cythonize
@@ -56,30 +55,11 @@ print('Git version: {0}'.format(version))
 if USE_CYTHON:
     extensions = cythonize(extensions)
 
-# Pip install and git clone dependancies. 
-# Note that all git installs will be at same level as "grizli"
 pip_packages = ['peakutils', 'scikit-learn', 'astroquery', 'shapely', 'reproject']
 # photutils, pysynphot, stwcs, drizzlepac -- why weren't these installed with astroconda?
-git_packages = {'lacosmicx':'https://github.com/cmccully/lacosmicx.git', 
-                'sewpy':'https://github.com/gbrammer/sewpy.git'}
 
-def pip_install(package):
+for package in pip_packages:
     pip.main(['install', package])
-
-def git_clone(package, url):
-    os.chdir('../') # cd to location just outside of grizli location
-    subprocess.call(['git', 'clone', url])
-    os.chdir(package)
-    subprocess.call(['python', 'setup.py', 'install'])
-
-def install_dependencies():
-    for package in pip_packages:
-        pip_install(package)
-    #for package, url in zip(git_packages.keys(), git_packages.values()):
-    #    git_clone(package, url)
-    #os.chdir('../grizli')
-
-install_dependencies()
 
 # Utility function to read the README file.
 # Used for the long_description.  It's nice, because now 1) we have a top level
