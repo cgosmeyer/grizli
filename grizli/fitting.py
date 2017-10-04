@@ -93,6 +93,8 @@ def run_all(id, t0=None, t1=None, fwhm=1200, zr=[0.65, 1.6], dz=[0.004, 0.0002],
         fit_obj = st
         
     fit = fit_obj.xfit_redshift(templates=t0, zr=zr, dz=dz, prior=prior, fitter=fitter, verbose=verbose) 
+    if fit == None:
+        return None
     fit_hdu = pyfits.table_to_hdu(fit)
     fit_hdu.header['EXTNAME'] = 'ZFIT_STACK'
     
@@ -727,7 +729,11 @@ class GroupFitter(object):
         if fitter == 'nnls':
             coeffs_i, rnorm = scipy.optimize.nnls(AxT, data)            
         elif fitter == 'lstsq':
-            coeffs_i, residuals, rank, s = np.linalg.lstsq(AxT, data)
+            try:
+                coeffs_i, residuals, rank, s = np.linalg.lstsq(AxT, data)
+            except: 
+                logging.info("FAILED at lstsq fitting.")
+                return None
         else:
             # Bounded Least Squares
             lsq_out = scipy.optimize.lsq_linear(AxT, data, bounds=(lower_bound[oktemp], upper_bound[oktemp]), method='bvls', tol=1.e-8)
@@ -831,7 +837,10 @@ class GroupFitter(object):
         out = self.xfit_at_z(z=0., templates=tpoly, fitter='lstsq',
                             fit_background=True, get_uncertainties=False)
         
-        chi2_poly, coeffs_poly, err_poly, cov = out
+        if out == None:
+            return None
+        else:
+            chi2_poly, coeffs_poly, err_poly, cov = out
         #poly1d, xxx = utils.dot_templates(coeffs_poly[self.N:], tpoly, z=0)
 
         # tpoly = utils.polynomial_templates(wpoly, order=3)
@@ -1076,7 +1085,12 @@ class GroupFitter(object):
                              fit_background=fit_background,
                              get_uncertainties=get_uncertainties)
 
-        chi2, coeffs, coeffs_err, covar = out
+        if out == None:
+            # Then fit failed, so return.
+            return None
+        else:
+            chi2, coeffs, coeffs_err, covar = out
+
         cont1d, line1d = utils.dot_templates(coeffs[self.N:], templates, z=z)
 
         # Parse template coeffs
