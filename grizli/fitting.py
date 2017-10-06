@@ -144,15 +144,25 @@ def run_all(id, t0=None, t1=None, fwhm=1200, zr=[0.65, 1.6], dz=[0.004, 0.0002],
     coeffs_clip = tfit['coeffs'][mb.N:]
     covar_clip = tfit['covar'][mb.N:,mb.N:]
     lineEW = utils.compute_equivalent_widths(t1, coeffs_clip, covar_clip, max_R=5000, Ndraw=1000)
-    
+
     for ik, key in enumerate(lineEW):
         cov_hdu.header['FLUX_{0:03d}'.format(ik)] = tfit['cfit'][key][0], '{0} line flux; erg / (s cm2)'.format(key.strip('line '))
         cov_hdu.header['ERR_{0:03d}'.format(ik)] = tfit['cfit'][key][1], '{0} line uncertainty; erg / (s cm2)'.format(key.strip('line '))
-        
-        cov_hdu.header['EW16_{0:03d}'.format(ik)] = lineEW[key][0], 'Rest-frame {0} EW, 16th percentile; Angstrom'.format(key.strip('line '))
-        cov_hdu.header['EW50_{0:03d}'.format(ik)] = lineEW[key][1], 'Rest-frame {0} EW, 50th percentile; Angstrom'.format(key.strip('line '))
-        cov_hdu.header['EW84_{0:03d}'.format(ik)] = lineEW[key][2], 'Rest-frame {0} EW, 84th percentile; Angstrom'.format(key.strip('line '))
-        cov_hdu.header['EWHW_{0:03d}'.format(ik)] = (lineEW[key][2]-lineEW[key][0])/2, 'Rest-frame {0} EW, 1-sigma half-width; Angstrom'.format(key.strip('line '))
+        print(ik, key)
+        lineEW_0 = lineEW[key][0]
+        lineEW_1 = lineEW[key][1] 
+        lineEW_2 = lineEW[key][2] 
+        # If inf in lineEW, then assign value of '999999999',
+        # which is more palateable for the FITS header      
+        if np.isinf(lineEW_0) or np.isinf(lineEW_1) or np.isinf(lineEW_2):
+            lineEW_0 = 999999999
+            lineEW_1 = 999999999
+            lineEW_2 = 999999999
+
+        cov_hdu.header['EW16_{0:03d}'.format(ik)] = lineEW_0, 'Rest-frame {0} EW, 16th percentile; Angstrom'.format(key.strip('line '))
+        cov_hdu.header['EW50_{0:03d}'.format(ik)] = lineEW_1, 'Rest-frame {0} EW, 50th percentile; Angstrom'.format(key.strip('line '))
+        cov_hdu.header['EW84_{0:03d}'.format(ik)] = lineEW_2, 'Rest-frame {0} EW, 84th percentile; Angstrom'.format(key.strip('line '))
+        cov_hdu.header['EWHW_{0:03d}'.format(ik)] = (lineEW_2-lineEW_0)/2, 'Rest-frame {0} EW, 1-sigma half-width; Angstrom'.format(key.strip('line '))
         
     # Best-fit template itself
     tfit_sp = grizli.utils.GTable()
